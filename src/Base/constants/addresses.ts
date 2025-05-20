@@ -1,0 +1,105 @@
+
+// DEX Router Addresses
+export const DEX_ROUTER = {
+  uniswapv2: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D ", //
+  uniswapv3: "0x2626664c2603336E57B271c5C0b26F421741e481", //
+  sushiswapv3: "0xA7caC4207579A179c1069435d032ee0F9F150e5c", 
+  uniswapv4: "0x6ff5693b99212da76ad316178a184ab56d299b43", //
+  aerodrome: "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43", //
+  aerodromeslipstream: "0x940181a94a35a4569e4529a3cdfb74e38fd98631",//
+  baseswap: "0x327Df1E6de05895d2ab08513aaDD9313Fe505d86", //
+  solidlyv3: "0x77784f96c936042a3adb1dd29c91a55eb2a4219f", //
+  pancakeswapv3: "0x678Aa4bF4E210cf2166753e054d5b7c31cc7fa86",
+  alienbase: "0x837d9B4139dFbAc869b2c67771730bC822863376", //
+};
+
+
+// DEX Router Addresses
+export const LENDING_PROTOCOL_ADDRESSES = {
+  aave: "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24",
+  spark: "0xE592427A0AEce92De3Edee1F18E0157C05861564", 
+  venus: "0xA7caC4207579A179c1069435d032ee0F9F150e5c", 
+  radiant: "0xA51afAFe0263b40EdaEf0Df8781eA9aa03E381a3", 
+  abracadabra: "0xc873fEcbd354f5A56E00E710B90EF4201db2448d", 
+  ironbank: "0x5c3b380e5Aeec389d1014Da3Eb372FA2C9e0fc76",
+  morpho: "0x2191718cd32d02b8e60badffea33e4b5dd9a0a0d", 
+  llamalend: "0xA7caC4207579A179c1069435d032ee0F9F150e5c",
+  creamfinance: "0x13f4ea83d0bd40e75c8222255bc855a974568dd4",
+  compound: "0xaa273216cc9201a1e4285ca623f584badc736944",
+};
+
+export const uniswapv2="0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
+export const uniswapv3Router="0x2626664c2603336E57B271c5C0b26F421741e481";
+export const uniswapv4Router="0x6ff5693b99212da76ad316178a184ab56d299b43";
+export const aerodromeRouter="0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43";
+export const sushiswapv3Router="0xA7caC4207579A179c1069435d032ee0F9F150e5c";
+export const pancakeswapv3Router="0x678Aa4bF4E210cf2166753e054d5b7c31cc7fa86";
+export const aerodromeslipstreamRouter="0x940181a94a35a4569e4529a3cdfb74e38fd98631";
+export const baseswapRouter="0x327Df1E6de05895d2ab08513aaDD9313Fe505d86";
+export const solidlyv3Router="0x77784f96c936042a3adb1dd29c91a55eb2a4219f";
+export const alienbaseRouter="0x837d9B4139dFbAc869b2c67771730bC822863376";
+
+export const uniswapv3Quoter2="0x61fFE014bA17989E743c5F6cB21bF9697530B21e";
+export const uniswapv3Quoter1="0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6";
+export const pancakeswapv3Quoter2="0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997";
+export const pancakeswapv3Quoter1='0x3652Fc6EDcbD76161b8554388867d3dAb65eCA93';
+export const CamelotQuoterAMMV3="0x0Fc73040b26E9bC8514fA028D998E73A254Fa76E";
+export const CamelotQuoterAMMV4="0x9b7A7c93Db745D5f6c679eeDa7Dd15CCd638C063";
+
+// Add the missing constants
+export const WETH = "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1";
+export const CHAINLINK_FEED_REGISTRY = "0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612";
+
+// Token Addresses
+export const TOKEN_ADDRESSES = {
+  WETH: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+  USDC: "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8",
+  USDT: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+  DAI: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
+  WBTC: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f",
+};
+
+// Common tokens for Arbitrum
+export const COMMON_TOKENS_ARBITRUM = {
+  WETH: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+  USDC: "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8",
+  USDT: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+  DAI: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
+  WBTC: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f",
+  ARB: "0x912CE59144191C1204E64559FE8253a0e49E6548",
+  GMX: "0xfc5A1A6EB076a2C7aD06eD22C90d7E710E35ad0a",
+};
+
+// Flashloan Providers
+export const FLASHLOAN_PROVIDERS = {
+  aave: "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
+  balancer: "0xBA12222222228d8Ba445958a75a0704d566BF2C8",
+  maker: "0x0000000000000000000000000000000000000000",
+};
+
+// MEV-related Addresses
+export const MEV_RELATED = {
+  FLASHBOTS_RELAY: "0xDAFEA492D9c6733ae3d56b7Ed1ADB60692c98Bc5",
+  MEV_SHARE: "0x0000000000000000000000000000000000000000",
+  EDEN_NETWORK: "0x0000000000000000000000000000000000000000",
+};
+
+// Executor contract address
+export const executorAddress = "";
+
+export const CHAINLINK_FEEDS: Record<string, string> = {
+  // Token: Feed (em Arbitrum)
+  "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": "0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612", // WETH/USD
+  "0xaf88d065e77c8cC2239327C5EDb3A432268e5831": "0x6ce185860a4963106506C203335A2910413708e9", // USDC/USD
+  "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9": "0x3f3f5dF88dC9F13eac63DF89EC16ef6e7E25DdE7", // USDT/USD
+  "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": "0x0d79df66BE487753B02D015Fb622DED7f0E9798d", // DAI/USD
+  "0x2f2a2543b76a4166549f7aaab1e5cbe5f0f175c0": "0x6ce185860a4963106506C203335A2910413708e9", // WBTC/USD (mesmo feed que USDC/USD — ajuste se preferir outro)
+  "0x912ce59144191c1204e64559fe8253a0e49e6548": "0xb2A824043730FE05F3DA2efafa1CBbe83fa548D6", // ARB/USD
+  "0xfc5a1a6eb076a5f6a6a3f71d3df93076f1d2a77f": "0xDB98056FecFff59D032aB628337A4887110df3dB", // GMX/USD
+};
+
+
+
+
+//--------------------------------------------------BASE-------------------------------------------------------------------//
+
