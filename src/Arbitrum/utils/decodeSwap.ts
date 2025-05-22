@@ -54,7 +54,7 @@ const DEX_ROUTERS = {
  * @param tx Transaction object from ethers
  * @returns Decoded swap parameters or null if not a swap
  */
-export function decodeSwap(tx: ethers.providers.TransactionResponse): DecodedSwapTransaction {
+export function decodeSwap(tx: ethers.Transaction): DecodedSwapTransaction {
   const fallback: DecodedSwapTransaction = {
     dex: "uniswapv3",
     tokenIn: ethers.constants.AddressZero,

@@ -5,7 +5,7 @@ import { buildSwapTransaction } from "../../shared/build/buildSwap";
 import { DexType, CallData, SwapStep } from "../../utils/types";
 import { DEX_ROUTER } from "../../constants/addresses";
 import { RouteElement } from "../../utils/mirrowedtransactions";
-
+import { normalizeDex } from "../../utils/formallizedDEX";
 const erc20Interface = new ethers.utils.Interface(ERC20_ABI);
 
 type Token = {
@@ -41,7 +41,7 @@ export async function buildDynamicOrchestration({
 
   // --- Pré-swap (step 0) se necessário ---
   const firstStep = steps[0];
-  const firstDexRouter = DEX_ROUTER[firstStep.dex.toLowerCase()];
+  const firstDexRouter = DEX_ROUTER[normalizeDex(firstStep.dex)];
   if (!firstDexRouter) throw new Error(`Dex router not found for ${firstStep.dex}`);
 
   if (flashLoanToken.toLowerCase() !== firstStep.tokenIn.toLowerCase()) {
@@ -82,7 +82,7 @@ export async function buildDynamicOrchestration({
   // --- Swaps principais (steps 1, 2, ...) ---
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
-    const dexRouter = DEX_ROUTER[step.dex.toLowerCase()];
+    const dexRouter = DEX_ROUTER[normalizeDex(step.dex)];
     if (!dexRouter) throw new Error(`Dex router not found for ${step.dex}`);
 
     const expectedOut = await estimateSwapOutput(
@@ -123,7 +123,7 @@ export async function buildDynamicOrchestration({
 
   // --- Pós-swap se necessário ---
   const lastStep = steps[steps.length - 1];
-  const lastDexRouter = DEX_ROUTER[lastStep.dex.toLowerCase()];
+  const lastDexRouter = DEX_ROUTER[normalizeDex(lastStep.dex)];
   if (!lastDexRouter) throw new Error(`Dex router not found for ${lastStep.dex}`);
 
   // Garante que outputEstimates não está vazio

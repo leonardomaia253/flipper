@@ -155,10 +155,11 @@ function cacheKeyQuoteExactInputSingle(params: any) {
 }
 
 export async function getPriceImpactAndProfit(
-  tx: ethers.providers.TransactionResponse
+  tx: ethers.Transaction
 ): Promise<PriceImpactProfit | null> {
+  if (!tx.hash) return null;
   if (processedTxCache.has(tx.hash)) return null;
-  processedTxCache.add(tx.hash);
+      processedTxCache.add(tx.hash);
 
   const decoded = decodeTransaction(tx.data);
   if (!decoded) return null;

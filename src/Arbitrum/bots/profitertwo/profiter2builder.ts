@@ -4,6 +4,7 @@ import { estimateSwapOutput } from "../../utils/estimateOutput";
 import { buildSwapTransaction } from "../../shared/build/buildSwap";
 import { CallData, DexType } from "../../utils/types";
 import { DEX_ROUTER } from "../../constants/addresses";
+import { normalizeDex } from "../../utils/formallizedDEX";
 
 const erc20Interface = new ethers.utils.Interface(ERC20_ABI);
 
@@ -40,7 +41,7 @@ export async function buildDynamicOrchestration({
   const swapCalls: CallData[] = [];
 
   const firstStep = route[0];
-  const firstDexRouter = DEX_ROUTER[firstStep.dex.toLowerCase()];
+  const firstDexRouter = DEX_ROUTER[normalizeDex(firstStep.dex)];
   if (!firstDexRouter) throw new Error(`Dex router not found for ${firstStep.dex}`);
 
   // --- Pré-swap se necessário ---
@@ -81,7 +82,7 @@ export async function buildDynamicOrchestration({
 
   // --- Swaps principais ---
   for (const step of route) {
-    const dexRouter = DEX_ROUTER[step.dex.toLowerCase()];
+    const dexRouter = DEX_ROUTER[normalizeDex(step.dex)];
     if (!dexRouter) throw new Error(`Dex router not found for ${step.dex}`);
 
     const minOut = step.amountOut.mul(10_000 - slippageBps).div(10_000);
@@ -113,7 +114,7 @@ export async function buildDynamicOrchestration({
 
   // --- Pós-swap se necessário ---
   const lastStep = route[route.length - 1];
-  const lastDexRouter = DEX_ROUTER[lastStep.dex.toLowerCase()];
+  const lastDexRouter = DEX_ROUTER[normalizeDex(lastStep.dex)];
   if (!lastDexRouter) throw new Error(`Dex router not found for ${lastStep.dex}`);
 
   if (flashLoanToken.toLowerCase() !== lastStep.tokenOut.toLowerCase()) {

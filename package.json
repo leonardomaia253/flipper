@@ -5,24 +5,26 @@
   "type": "commonjs",
   "main": "src/index.ts",
   "scripts": {
-    "build":"tsc",
+    "build": "tsc",
     "arbitrage": "ts-node src/Arbitrum/bots/arbitrage/index.ts",
-    "frontrun": "ts-node/esm src/Arbitrum/bots/frontrun/frontrunwatcher.ts",
-    "sandwich": "ts-node/esm src/Arbitrum/bots/sandwich/sandwichScanner.ts",
-    "pofiter1": "ts-node/esm src/Arbitrum/bots/profiterone/index.ts",
-    "profiter2": "ts-node/esm src/Arbitrum/bots/profitertwo/index.ts",
-    "liquidation": "ts-node/esm src/Arbitrum/bots/liquidation/index.ts"
-},
+    "frontrun": "ts-node src/Arbitrum/bots/frontrun/frontrunwatcher.ts",
+    "sandwich": "ts-node src/Arbitrum/bots/sandwich/sandwichScanner.ts",
+    "pofiter1": "ts-node src/Arbitrum/bots/profiterone/index.ts",
+    "profiter2": "ts-node src/Arbitrum/bots/profitertwo/index.ts",
+    "liquidation": "ts-node src/Arbitrum/bots/liquidation/index.ts"
+  },
   "dependencies": {
     "axios": "^1.6.8",
     "dotenv": "^16.4.5",
-    "ethers": "^6.10.0",
-    "ws": "^8.13.0"
+    "ethers": "^5.8.0",
+    "ws": "^8.18.2"
   },
   "devDependencies": {
-    "typescript": "^5.5.0",
-    "ts-node": "^10.9.2"
-},
+    "@types/node-fetch": "^2.6.12",
+    "@types/ws": "^8.18.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.0"
+  },
   "keywords": [
     "MEV",
     "DeFi",

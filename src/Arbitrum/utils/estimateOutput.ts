@@ -15,7 +15,18 @@ const UniswapV4RouterABI = [
 ];
 
 const UniswapV3QuoterABI = [
-  "function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) view returns (uint256 amountOut)"
+  {
+    "inputs": [
+      { "internalType": "bytes", "name": "path", "type": "bytes" },
+      { "internalType": "uint256", "name": "amountIn", "type": "uint256" }
+    ],
+    "name": "quoteExactInput",
+    "outputs": [
+      { "internalType": "uint256", "name": "amountOut", "type": "uint256" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
 ];
 
 const UniswapV2RouterABI = [
@@ -70,7 +81,7 @@ export async function estimateSwapOutput(
 
     // V3/V4 with Quoter
     if (["uniswapv3", "sushiswapv3", "pancakeswapv3"].includes(lowerDex)) {
-      const quoter = new ethers.Contract(DEX_ROUTER[dex], UniswapV3QuoterABI, provider);
+      const quoter = new ethers.Contract("0x61fFE014bA17989E743c5F6cB21bF9697530B21e", UniswapV3QuoterABI, provider);
       const path = encodeUniswapV3Path([tokenIn, tokenOut], [3000]); // assume fee de 0.3%
       const amountsOut = await quoter.callStatic.quoteExactInput(path, amountIn);
       return amountsOut.amountOut || amountsOut; // alguns retornam só o número

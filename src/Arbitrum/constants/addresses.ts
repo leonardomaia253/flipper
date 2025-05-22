@@ -1,4 +1,4 @@
-
+import { DexType } from "../utils/types";
 // Lending Protocol Addresses Arbitrum
 export const LENDING_POOL = {
   AAVE_V3: {
@@ -33,7 +33,7 @@ export const LENDING_POOL = {
 };
 
 // DEX Router Addresses
-export const DEX_ROUTER = {
+export const DEX_ROUTER: Record<DexType, string> = {
   uniswapv2: "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24",
   uniswapv3: "0xE592427A0AEce92De3Edee1F18E0157C05861564", 
   sushiswapv3: "0xA7caC4207579A179c1069435d032ee0F9F150e5c", 

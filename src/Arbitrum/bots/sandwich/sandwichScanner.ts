@@ -17,16 +17,21 @@ import { TokenInfo, SwapStep } from "../../utils/types";
 import { buildOrchestrateCall } from "../../shared/build/buildOrchestrate";
 import { CallData } from "../../utils/types";
 
+import WebSocket from "ws";
+
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 // --- Constantes e configuração ---
 
-const WEBSOCKET_RPC_URL = process.env.WEBSOCKET_RPC_URL!;
+const BLOXROUTE_WSS = process.env.BLOXROUTE_WSS!;
+const BLOXROUTE_AUTH_HEADER = process.env.BLOXROUTE_AUTH_HEADER!;
+const RPC_URL = process.env.ALCHEMY_HTTP!;
 const PRIVATE_KEY = process.env.PRIVATE_KEY!;
 const DRY_RUN = process.env.DRY_RUN === "true";
 const MIN_PROFIT = ethers.utils.parseEther(process.env.MIN_PROFIT || "0.005");
 
-if (!WEBSOCKET_RPC_URL) throw new Error("Missing WEBSOCKET_RPC_URL in .env");
+if (!BLOXROUTE_WSS) throw new Error("Missing BLOXROUTE_WSS in .env");
+if (!BLOXROUTE_AUTH_HEADER) throw new Error("Missing BLOXROUTE_AUTH_HEADER in .env");
 if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY não definida no .env");
 
 const currentBaseToken: TokenInfo = {
@@ -35,7 +40,7 @@ const currentBaseToken: TokenInfo = {
   decimals: 18,
 };
 
-const provider = new ethers.providers.WebSocketProvider(WEBSOCKET_RPC_URL);
+const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
 const signer = new ethers.Wallet(PRIVATE_KEY, provider);
 
 const processedTxs = new Set<string>();
@@ -52,7 +57,7 @@ interface BundleTransaction {
   };
 }
 
-// --- Funções utilitárias ---
+// --- Utilitárias ---
 
 function cleanCache(txHash: string) {
   processedTxs.add(txHash);
@@ -77,15 +82,15 @@ function isProfitSufficient(profit: BigNumber | null): boolean {
   return !!profit && profit.gt(MIN_PROFIT);
 }
 
-async function processTransaction(txHash: string, dexList: string[]) {
+async function processTransaction(txHash: string, rawTx: string, dexList: string[]) {
   if (!shouldProcessTx(txHash)) return;
   cleanCache(txHash);
 
-  const tx = await provider.getTransaction(txHash);
-  if (!tx) return;
+  const tx = ethers.utils.parseTransaction(rawTx);
+  if (!tx || !tx.to) return;
 
-  const to = tx.to?.toLowerCase();
-  if (!to || !dexList.includes(to)) return;
+  const to = tx.to.toLowerCase();
+  if (!dexList.includes(to)) return;
 
   const priceImpactProfit = await getPriceImpactAndProfit(tx);
   if (!priceImpactProfit) return;
@@ -124,7 +129,6 @@ async function processTransaction(txHash: string, dexList: string[]) {
   }
 
   const calls: CallData[] = [
-  
     ...orchestrationResult.approveCalls.map(call => ({
       to: call.to,
       data: call.data,
@@ -136,16 +140,15 @@ async function processTransaction(txHash: string, dexList: string[]) {
       to: call.to,
       data: call.data,
       requiresApproval: true,
-      approvalToken: call.to,  // provavelmente o token que está aprovando
+      approvalToken: call.to,
       approvalAmount: call.approvalAmount,
     })),
-  
-      ];
-  
-      const atomic = await buildOrchestrateCall({
-         token: flashLoanToken,
-         amount: flashLoanAmount,
-         calls,
+  ];
+
+  const atomic = await buildOrchestrateCall({
+    token: flashLoanToken,
+    amount: flashLoanAmount,
+    calls,
   });
 
   const swapRemainingTx = await buildSwapToETHCall({
@@ -156,12 +159,7 @@ async function processTransaction(txHash: string, dexList: string[]) {
 
   const unwrapCall = buildUnwrapWETHCall({ wethAddress: WETH });
 
-  const orchestrationTxs = [
-    atomic,
-    swapRemainingTx,
-    unwrapCall,
-  ];
-
+  const orchestrationTxs = [atomic, swapRemainingTx, unwrapCall];
   const bundleTxs = buildBundle(orchestrationTxs);
 
   if (DRY_RUN) {
@@ -177,12 +175,53 @@ async function processTransaction(txHash: string, dexList: string[]) {
 
 // --- Execução principal ---
 
-const dexList = (await getDexList()).map(addr => addr.toLowerCase());
+async function main() {
+  const dexList = (await getDexList()).map(addr => addr.toLowerCase());
 
-log.info("⏳ Aguardando novas transações na mempool...");
+  log.info("⏳ Aguardando novas transações via bloXroute...");
 
-provider.on("pending", (txHash: string) => {
-  processTransaction(txHash, dexList).catch(err => {
-    log.error(`Erro no processamento da tx ${txHash}: ${(err as Error).message}`);
+ const ws = new WebSocket(BLOXROUTE_WSS, {
+  headers: {
+    Authorization: `Bearer ${BLOXROUTE_AUTH_HEADER}`,
+  },
+});
+
+
+  ws.on("open", () => {
+    log.info("✅ Conectado à bloXroute");
+    const subscription = {
+      jsonrpc: "2.0",
+      method: "subscribe",
+      params: ["newTxs", { include: ["rawTx", "txHash"] }],
+      id: 1,
+    };
+    ws.send(JSON.stringify(subscription));
   });
+
+  ws.on("message", (data: string) => {
+    try {
+      const parsed = JSON.parse(data);
+      if (parsed.params && parsed.params.result) {
+        const txHash = parsed.params.result.txHash;
+        const rawTx = parsed.params.result.rawTx;
+        processTransaction(txHash, rawTx, dexList).catch(err => {
+          log.error(`Erro no processamento da tx ${txHash}: ${(err as Error).message}`);
+        });
+      }
+    } catch (err) {
+      log.error("Erro ao processar mensagem bloXroute: ");
+    }
+  });
+
+  ws.on("error", (err) => {
+  log.error(" Conexão bloXroute fechada.", err );
+});
+
+  ws.on("error", (err) => {
+    log.error("Erro na conexão bloXroute: ", err);
+  });
+}
+
+main().catch(err => {
+  log.error("Erro no main: ", err);
 });
