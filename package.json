@@ -6,12 +6,12 @@
   "main": "src/index.ts",
   "scripts": {
     "build":"tsc",
-    "arbitrage": "node --loader ts-node/esm --no-warnings src/Arbitrum/bots/arbitrage/index.ts",
-    "frontrun": "node --loader ts-node/esm --no-warnings src/Arbitrum/bots/frontrun/frontrunwatcher.ts",
-    "sandwich": "node --loader ts-node/esm --no-warnings src/Arbitrum/bots/sandwich/sandwichScanner.ts",
-    "pofiter1": "node --loader ts-node/esm --no-warnings rc/Arbitrum/bots/profiterone/index.ts",
-    "profiter2": "node --loader ts-node/esm --no-warnings src/Arbitrum/bots/profitertwo/index.ts",
-    "liquidation": "node --loader ts-node/esm --no-warnings src/Arbitrum/bots/liquidation/index.ts"
+    "arbitrage": "ts-node src/Arbitrum/bots/arbitrage/index.ts",
+    "frontrun": "ts-node/esm src/Arbitrum/bots/frontrun/frontrunwatcher.ts",
+    "sandwich": "ts-node/esm src/Arbitrum/bots/sandwich/sandwichScanner.ts",
+    "pofiter1": "ts-node/esm src/Arbitrum/bots/profiterone/index.ts",
+    "profiter2": "ts-node/esm src/Arbitrum/bots/profitertwo/index.ts",
+    "liquidation": "ts-node/esm src/Arbitrum/bots/liquidation/index.ts"
 },
   "dependencies": {
     "axios": "^1.6.8",
