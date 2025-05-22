@@ -1,9 +1,10 @@
 import { ethers, BigNumber, Contract } from 'ethers';
 import { provider } from '../../config/provider'; // seu provider ethers
+import { uniswapv3Router, uniswapv3Quoter2 } from '../../constants/addresses';
 
 // ENDEREÇOS principais da Uniswap V3 na Ethereum mainnet (ajuste para sua rede se precisar)
-const UNISWAP_V3_QUOTER_ADDRESS = '0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6';
-const UNISWAP_V3_ROUTER_ADDRESS = '0xE592427A0AEce92De3Edee1F18E0157C05861564';
+const UNISWAP_V3_QUOTER_ADDRESS = uniswapv3Router;
+const UNISWAP_V3_ROUTER_ADDRESS = uniswapv3Quoter2;
 
 // ABI simplificado do Quoter Uniswap V3 (para quoteExactInputSingle)
 const UNISWAP_V3_QUOTER_ABI = [

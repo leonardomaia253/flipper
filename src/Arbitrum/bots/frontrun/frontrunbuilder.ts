@@ -1,220 +1,174 @@
-import { ethers, BigNumber } from "ethers";
-import { buildOrchestrateCall } from "../../shared/build/buildOrchestrate";
-import { buildSwapTransaction } from "../../shared/build/buildSwap";
-import { CallData, DexType } from "../../utils/types";
+import { BigNumber, ethers } from "ethers";
 import { ERC20_ABI } from "../../constants/abis";
-import { DEX_ROUTER } from "../../constants/dexes";
-import { estimateSwapOutput } from "../../shared/utils/QuoteRouter";
+import { estimateSwapOutput } from "../../utils/estimateOutput";
+import { buildSwapTransaction } from "../../shared/build/buildSwap";
+import { DexType, CallData, SwapStep } from "../../utils/types";
+import { DEX_ROUTER } from "../../constants/addresses";
+import { RouteElement } from "../../utils/mirrowedtransactions";
 
+const erc20Interface = new ethers.utils.Interface(ERC20_ABI);
 
-export async function buildFrontrunBundlelongo({
-  dex,
-  tokenIn,
-  tokenOut,
-  amountIn, 
-  amountOutMin, 
-  recipient,
-  flashLoanToken,
-  flashLoanAmount,
-}: {
-  dex: DexType;
-  tokenIn: string;
-  tokenOut: string;
-  amountIn: ethers.BigNumber;
-  amountOutMin:ethers.BigNumber;
-  recipient: string;
+type Token = {
+  address: string;
+  symbol: string;
+  decimals: number;
+};
+
+type BuildOrchestrationOptions = {
+  steps: RouteElement[];
   flashLoanToken: string;
   flashLoanAmount: BigNumber;
-  
-}): Promise<CallData> {
-  const frontRunToken = tokenIn;
-  const frontRunAmount = amountIn;
-  const BackRunToken = tokenOut;
-  const BackRunAmount = amountOutMin;
-  const dexRouterAddress = DEX_ROUTER[dex];
-  if (!dexRouterAddress) throw new Error(`[builder] Router address not found for DEX: ${dex}`);
-  const erc20 = new ethers.utils.Interface(ERC20_ABI);
-  const amountToApproveflash = flashLoanAmount.mul(2);
-  const amountToApprovebuy = frontRunAmount.mul(2);
-  const amountToApprovesell = BackRunAmount.mul(2);
-  const wethInterface = new ethers.utils.Interface(["function withdraw(uint256 wad)"]);
+  slippageBps?: number;
+};
 
-  const approveCalls: CallData[] = [
-    {
-      to: flashLoanToken,
-      data: erc20.encodeFunctionData("approve", [dexRouterAddress, amountToApproveflash]),
-      dex,
-      requiresApproval: true,
-      approvalToken: flashLoanToken,
-      approvalAmount: amountToApproveflash,
-      value: BigNumber.from(0)
-    },
-    {
-      to: frontRunToken,
-      data: erc20.encodeFunctionData("approve", [dexRouterAddress, amountToApprovebuy]),
-      dex,
-      requiresApproval: true,
-      approvalToken: frontRunToken,
-      approvalAmount: amountToApprovebuy,
-      value: BigNumber.from(0)
-    },
-    {
-      to: BackRunToken,
-      data: erc20.encodeFunctionData("approve", [dexRouterAddress, amountToApprovesell]),
-      dex,
-      requiresApproval: true,
-      approvalToken: BackRunToken,
-      approvalAmount: amountToApprovesell,
-      value: BigNumber.from(0)
-    },
-  ];
+export async function buildDynamicOrchestration({
+  steps,
+  flashLoanToken,
+  flashLoanAmount,
+  slippageBps = 30,
+}: BuildOrchestrationOptions): Promise<{
+  approveCalls: CallData[];
+  swapCalls: CallData[];
+}> {
+  if (steps.length === 0) {
+    throw new Error("No swap steps provided");
+  }
 
-   const expectedAmountBuy = await estimateSwapOutput(frontRunToken, BackRunToken, frontRunAmount, dex);
-   const expectedAmountSell = await estimateSwapOutput(frontRunToken, BackRunToken, expectedAmountBuy, dex);
-   const expectedAmountBuy2 = await estimateSwapOutput(BackRunToken, BackRunToken, expectedAmountSell, dex);
-   const expectedAmountFlash = await estimateSwapOutput(frontRunToken, flashLoanToken,expectedAmountBuy2, dex);
+  const approveCache = new Set<string>();
+  const approveCalls: CallData[] = [];
+  const swapCalls: CallData[] = [];
+  const outputEstimates: BigNumber[] = [];
 
-  const [buyCall, frontrunToVictimCall, victimBackToFrontrunCall, frontrunToFlashLoanCall] = await Promise.all([
-    buildSwapTransaction({
+  // --- Pré-swap (step 0) se necessário ---
+  const firstStep = steps[0];
+  const firstDexRouter = DEX_ROUTER[firstStep.dex.toLowerCase()];
+  if (!firstDexRouter) throw new Error(`Dex router not found for ${firstStep.dex}`);
+
+  if (flashLoanToken.toLowerCase() !== firstStep.tokenIn.toLowerCase()) {
+    const estimated = await estimateSwapOutput(
+      flashLoanToken,
+      firstStep.tokenIn,
+      flashLoanAmount,
+      firstStep.dex
+    );
+
+    const minOut = estimated.mul(10_000 - slippageBps).div(10_000);
+
+    const tokenKey = `${flashLoanToken.toLowerCase()}-${firstStep.dex.toLowerCase()}`;
+    if (!approveCache.has(tokenKey)) {
+      approveCache.add(tokenKey);
+      approveCalls.push({
+        to: flashLoanToken,
+        data: erc20Interface.encodeFunctionData("approve", [firstDexRouter, flashLoanAmount]),
+        dex: firstStep.dex,
+        requiresApproval: true,
+        approvalToken: flashLoanToken,
+        approvalAmount: flashLoanAmount,
+        value: BigNumber.from(0),
+      });
+    }
+
+    const preSwap = await buildSwapTransaction({
       tokenIn: flashLoanToken,
-      tokenOut: frontRunToken,
+      tokenOut: firstStep.tokenIn,
       amountIn: flashLoanAmount,
-      amountOutMin: expectedAmountBuy,
-      dex,
-      recipient,
-    }),
-    buildSwapTransaction({
-      tokenIn: frontRunToken,
-      tokenOut: BackRunToken,
-      amountIn: frontRunAmount,
-      amountOutMin: expectedAmountSell,
-      dex,
-      recipient,
-    }),
-    buildSwapTransaction({
-      tokenIn: BackRunToken,
-      tokenOut: frontRunToken,
-      amountIn: BackRunAmount,
-      amountOutMin: expectedAmountBuy2,
-      dex,
-      recipient,
-    }),
-    buildSwapTransaction({
-      tokenIn: frontRunToken,
+      amountOutMin: minOut,
+      dex: firstStep.dex,
+    });
+
+    swapCalls.push(preSwap);
+  }
+
+  // --- Swaps principais (steps 1, 2, ...) ---
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    const dexRouter = DEX_ROUTER[step.dex.toLowerCase()];
+    if (!dexRouter) throw new Error(`Dex router not found for ${step.dex}`);
+
+    const expectedOut = await estimateSwapOutput(
+      step.tokenIn,
+      step.tokenOut,
+      step.amountIn,
+      step.dex
+    );
+
+    outputEstimates.push(expectedOut);
+
+    const minOut = expectedOut.mul(10_000 - slippageBps).div(10_000);
+
+    const tokenKey = `${step.tokenIn.toLowerCase()}-${step.dex.toLowerCase()}`;
+    if (!approveCache.has(tokenKey)) {
+      approveCache.add(tokenKey);
+      approveCalls.push({
+        to: step.tokenIn,
+        data: erc20Interface.encodeFunctionData("approve", [dexRouter, step.amountIn]),
+        dex: step.dex,
+        requiresApproval: true,
+        approvalToken: step.tokenIn,
+        approvalAmount: step.amountIn,
+        value: BigNumber.from(0),
+      });
+    }
+
+    const swapTx = await buildSwapTransaction({
+      tokenIn: step.tokenIn,
+      tokenOut: step.tokenOut,
+      amountIn: step.amountIn,
+      amountOutMin: minOut,
+      dex: step.dex,
+    });
+
+    swapCalls.push(swapTx);
+  }
+
+  // --- Pós-swap se necessário ---
+  const lastStep = steps[steps.length - 1];
+  const lastDexRouter = DEX_ROUTER[lastStep.dex.toLowerCase()];
+  if (!lastDexRouter) throw new Error(`Dex router not found for ${lastStep.dex}`);
+
+  // Garante que outputEstimates não está vazio
+  if (
+    flashLoanToken.toLowerCase() !== lastStep.tokenOut.toLowerCase() &&
+    outputEstimates.length > 0
+  ) {
+    const lastOutput = outputEstimates[outputEstimates.length - 1];
+
+    const estimated = await estimateSwapOutput(
+      lastStep.tokenOut,
+      flashLoanToken,
+      lastOutput,
+      lastStep.dex
+    );
+
+    const minOut = estimated.mul(10_000 - slippageBps).div(10_000);
+
+    const tokenKey = `${lastStep.tokenOut.toLowerCase()}-${lastStep.dex.toLowerCase()}`;
+    if (!approveCache.has(tokenKey)) {
+      approveCache.add(tokenKey);
+      approveCalls.push({
+        to: lastStep.tokenOut,
+        data: erc20Interface.encodeFunctionData("approve", [lastDexRouter, lastOutput]),
+        dex: lastStep.dex,
+        requiresApproval: true,
+        approvalToken: lastStep.tokenOut,
+        approvalAmount: lastOutput,
+        value: BigNumber.from(0),
+      });
+    }
+
+    const postSwap = await buildSwapTransaction({
+      tokenIn: lastStep.tokenOut,
       tokenOut: flashLoanToken,
-      amountIn: frontRunAmount,
-      amountOutMin: expectedAmountFlash,
-      dex,
-      recipient,
-    })
-  ]);
+      amountIn: lastOutput,
+      amountOutMin: minOut,
+      dex: lastStep.dex,
+    });
 
-  const calls: CallData[] = [
-    ...approveCalls,
-    buyCall,
-    frontrunToVictimCall,
-    victimBackToFrontrunCall,
-    frontrunToFlashLoanCall,
-  ];
-
-  const orchestrateResult = await buildOrchestrateCall({
-    token: flashLoanToken,
-    amount: flashLoanAmount,
-    calls
-  });
+    swapCalls.push(postSwap);
+  }
 
   return {
-    to: orchestrateResult.to,
-    data: orchestrateResult.data || "",
-
+    approveCalls,
+    swapCalls,
   };
 }
-
-
-export async function buildFrontrunBundlecurto({
-  dex,
-  tokenIn,
-  tokenOut,
-  amountIn, 
-  amountOutMin, 
-  recipient, 
-}: {
-  dex: DexType;
-  tokenIn: string;
-  tokenOut: string;
-  amountIn: ethers.BigNumber;
-  amountOutMin:ethers.BigNumber;
-  recipient: string;
-  
-}): Promise<CallData> {
-  const frontRunToken = tokenIn;
-  const frontRunAmount = amountIn;
-  const BackRunToken = tokenOut;
-  const BackRunAmount = amountOutMin;
-  const dexRouterAddress = DEX_ROUTER[dex];
-  if (!dexRouterAddress) throw new Error(`[builder] Router address not found for DEX: ${dex}`);
-  const erc20 = new ethers.utils.Interface(ERC20_ABI);
-  const amountToApprovebuy = frontRunAmount.mul(2);
-  const amountToApprovesell = BackRunAmount.mul(2);
-
-  const approveCalls: CallData[] = [
-    {
-      to: frontRunToken,
-      data: erc20.encodeFunctionData("approve", [dexRouterAddress, amountToApprovebuy]),
-      dex,
-      requiresApproval: true,
-      approvalToken: frontRunToken,
-      approvalAmount: amountToApprovebuy,
-      value: BigNumber.from(0)
-    },
-    {
-      to: BackRunToken,
-      data: erc20.encodeFunctionData("approve", [dexRouterAddress, amountToApprovesell]),
-      dex,
-      requiresApproval: true,
-      approvalToken: BackRunToken,
-      approvalAmount: amountToApprovesell,
-      value: BigNumber.from(0)
-    },
-  ];
-
-  const expectedAmountSell = await estimateSwapOutput(frontRunToken, BackRunToken, frontRunAmount, dex);
-  const expectedAmountBuy = await estimateSwapOutput(BackRunToken, BackRunToken, BackRunAmount, dex);
-
-  const [buyCall, frontrunToVictimCall] = await Promise.all([
-    buildSwapTransaction({
-      tokenIn: frontRunToken,
-      tokenOut: BackRunToken,
-      amountIn: frontRunAmount,
-      amountOutMin: expectedAmountSell.mul(995).div(1000),
-      dex,
-      recipient,
-    }),
-    buildSwapTransaction({
-      tokenIn: BackRunToken,
-      tokenOut: frontRunToken,
-      amountIn: frontRunAmount,
-      amountOutMin: expectedAmountBuy.mul(995).div(1000),
-      dex,
-      recipient,
-    }),
-  ]);
-
-  const calls: CallData[] = [
-    ...approveCalls,
-    buyCall,
-    frontrunToVictimCall,
-  ];
-
-  const orchestrateResult = await buildOrchestrateCall({
-    token: frontRunToken,
-    amount: frontRunAmount,
-    calls
-  });
-
-  return {
-    to: orchestrateResult.to,
-    data: orchestrateResult.data || "",
-  };
-}
-

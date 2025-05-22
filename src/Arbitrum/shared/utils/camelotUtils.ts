@@ -1,8 +1,8 @@
 // utils/camelotUtils.ts
 import { Contract, BigNumber } from 'ethers';
 import { provider } from '../../config/provider';
+import { camelotRouter } from '../../constants/addresses';
 
-const CAMELOT_ROUTER_ADDRESS = '0xC873fEcbd354f5A56E00E710B90EF4201db2448d';
 
 export const CAMELOT_ROUTER_ABI = [
   {
@@ -19,8 +19,8 @@ export const CAMELOT_ROUTER_ABI = [
   }
 ];
 
-export const camelotRouter = new Contract(
-  CAMELOT_ROUTER_ADDRESS,
+export const camelot = new Contract(
+  camelotRouter,
   CAMELOT_ROUTER_ABI,
   provider
 ) as Contract & {
@@ -29,7 +29,7 @@ export const camelotRouter = new Contract(
 
 export async function getQuoteCamelot(from: string, to: string, amountIn: BigNumber): Promise<BigNumber> {
   try {
-    const amounts = await camelotRouter.getAmountsOut(amountIn, [from, to]);
+    const amounts = await camelot.getAmountsOut(amountIn, [from, to]);
     return amounts[1];
   } catch {
     return BigNumber.from(0);

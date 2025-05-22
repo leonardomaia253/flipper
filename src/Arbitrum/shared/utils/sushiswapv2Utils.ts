@@ -1,8 +1,9 @@
 import { ethers, BigNumber, Contract } from 'ethers';
 import { provider } from '../../config/provider';
+import { sushiswapv2Router } from '../../constants/addresses';
 
 // Endereço oficial SushiSwap V2 Factory mainnet
-const SUSHISWAP_V2_FACTORY_ADDRESS = '0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac';
+const SUSHISWAP_V2_FACTORY_ADDRESS = sushiswapv2Router;
 
 // ABI igual ao Uniswap V2 (simplificada)
 const SUSHISWAP_V2_FACTORY_ABI = [

@@ -9,7 +9,9 @@ export type BuildOrchestrationParams = {
   useAltToken?: boolean;           // Se usará token alternativo (ex: WETH)
   altToken?: string;               // Token alternativo a ser usado (ex: WETH)
   preSwapDex?: string;            // DEX usado para altToken → tokenIn (se usar altToken)
-  postSwapDex?: string;           // DEX usado para tokenOut → altToken (se usar altToken)
+  postSwapDex?: string; 
+  flashLoanAmount?: BigNumber;
+  flashLoanToken?: string;          
 };
 
 // Define types used throughout the application
@@ -163,7 +165,7 @@ export type DexSwap = {
   callbackRecipient?: string;
   sqrtPriceLimitX96?: number;
   dex: DexType;
-  recipient: string;
+  recipient?: string;
   flashLoanToken?: string;
   flashLoanAmount?: BigNumber;
 };
@@ -217,10 +219,10 @@ export type SwapStep = {
   amountOutMin?: BigNumber;     // Quantidade mínima de saída esperada
   path?: string[];           // Caminho (usado por alguns DEXs como Uniswap V2/V3)
   extra?: any; 
-  router:string;  
-  to: string;          // endereço do contrato a ser chamado
-  data: string;        // calldata da função
-  value?: bigint; 
+  router?:string;  
+  to?: string;          // endereço do contrato a ser chamado
+  data?: string;        // calldata da função
+  value?: BigNumber; 
   poolData?: PoolData | string;           // Campo opcional para parâmetros específicos (ex: fee tiers da Uniswap V3)
 };
 
@@ -251,6 +253,7 @@ export type BasicSwapStep = {
 
 
 export interface DecodedSwapTransaction {
+  [x: string]: any;
   tokenIn: string;
   tokenOut: string;
   amountIn: BigNumber;

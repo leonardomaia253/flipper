@@ -1,8 +1,9 @@
 import { ethers, BigNumber, Contract } from 'ethers';
 import { provider } from '../../config/provider';
+import { uniswapv2Router } from '../../constants/addresses';
 
 // Endereço oficial Uniswap V2 Factory mainnet (ajuste para sua rede)
-const UNISWAP_V2_FACTORY_ADDRESS = '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f';
+const UNISWAP_V2_FACTORY_ADDRESS = uniswapv2Router;
 
 // ABI simplificada do Factory (apenas getPair)
 const UNISWAP_V2_FACTORY_ABI = [

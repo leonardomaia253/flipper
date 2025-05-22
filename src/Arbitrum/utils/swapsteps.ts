@@ -1,5 +1,3 @@
-
-import { buildOrchestrationFromRoute } from "../bots/arbitrage/arbitragebuilder";
 import { SwapStep, TokenInfo, DexType } from "../utils/types";
 import { ethers } from 'ethers';
 import { buildSwapTransaction } from "../shared/build/buildSwap";
@@ -46,7 +44,6 @@ export async function convertRouteToSwapSteps(
       amountIn: swap.amountIn,
       amountOutMin,
       dex: swap.dex,
-      recipient
     });
 
     steps.push({

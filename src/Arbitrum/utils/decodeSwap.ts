@@ -2,6 +2,7 @@
 import { ethers, BigNumber } from "ethers";
 import { DexType, DecodedSwapTransaction } from "./types";
 import { enhancedLogger } from "./enhancedLogger";
+import { WETH } from '../constants/addresses';
 
 // ABI fragments for decoding swap methods
 const UNISWAP_V2_ROUTER_ABI = [
@@ -53,98 +54,98 @@ const DEX_ROUTERS = {
  * @param tx Transaction object from ethers
  * @returns Decoded swap parameters or null if not a swap
  */
-export function decodeSwap(tx: ethers.providers.TransactionResponse): DecodedSwapTransaction | null {
+export function decodeSwap(tx: ethers.providers.TransactionResponse): DecodedSwapTransaction {
+  const fallback: DecodedSwapTransaction = {
+    dex: "uniswapv3",
+    tokenIn: ethers.constants.AddressZero,
+    tokenOut: ethers.constants.AddressZero,
+    amountIn: ethers.constants.Zero,
+    amountOutMin: ethers.constants.Zero,
+    recipient: ethers.constants.AddressZero,
+    path: [],
+    deadline: ethers.constants.Zero,
+  };
+
   try {
-    // Skip if no data or value is missing
-    if (!tx.data || !tx.to) return null;
-    
+    if (!tx.data || !tx.to) return fallback;
+
     const lowercaseTo = tx.to.toLowerCase();
 
-    // Try to identify the DEX based on the router address
-    let dexType: DexType;
+    let dexType: DexType | undefined;
+
     for (const [key, addresses] of Object.entries(DEX_ROUTERS)) {
       if (addresses.includes(lowercaseTo)) {
         dexType = key.toLowerCase() as DexType;
         break;
       }
     }
-    
-    // If we couldn't identify the DEX, bail out
-    if (!dexType) return null;
-    
-    // Create the appropriate interface for parsing
+
+    if (!dexType) return fallback;
+
     let iface: ethers.utils.Interface;
-    
-    if (dexType.includes('uniswapv2')) {
+
+    if (dexType.includes('uniswapv2') || dexType.includes('sushiswapv2') || dexType.includes('camelot')) {
       iface = new ethers.utils.Interface(UNISWAP_V2_ROUTER_ABI);
-    } else if (dexType.includes('sushiswapv2')) {
-      iface = new ethers.utils.Interface(UNISWAP_V2_ROUTER_ABI);
-    } else if (dexType.includes('camelot')) {
-      iface = new ethers.utils.Interface(UNISWAP_V2_ROUTER_ABI);
-    } else if (dexType.includes('uniswapv3')) {
+    } else if (
+      dexType.includes('uniswapv3') || 
+      dexType.includes('sushiswapv3') || 
+      dexType.includes('pancakeswapv3') || 
+      dexType.includes('ramsesv2')
+    ) {
       iface = new ethers.utils.Interface(UNISWAP_V3_ROUTER_ABI);
-    } else if (dexType.includes('sushiswapv3')) {
-      iface = new ethers.utils.Interface(UNISWAP_V3_ROUTER_ABI);
-    } else if (dexType.includes('pancakeswapv3')) {
-      iface = new ethers.utils.Interface(UNISWAP_V3_ROUTER_ABI);
-    } else if (dexType.includes('ramsesv2')) {
-      iface = new ethers.utils.Interface(UNISWAP_V3_ROUTER_ABI);
+    } else if (dexType.includes('uniswapv4')) {
+      iface = new ethers.utils.Interface(UNISWAP_V4_ROUTER_ABI);
     } else if (dexType.includes('maverickv2')) {
       iface = new ethers.utils.Interface(MAVERICK_V2_ROUTER_ABI);
     } else if (dexType.includes('curve')) {
       iface = new ethers.utils.Interface(CURVE_ROUTER_ABI);
-    } else if (dexType.includes('uniswapv4')) {
-      iface = new ethers.utils.Interface(UNISWAP_V4_ROUTER_ABI);
     } else {
-      return null; // Unsupported DEX type
+      return fallback;
     }
-    
-    // Try to decode the transaction
+
     let decodedData;
     try {
       decodedData = iface.parseTransaction({ data: tx.data });
     } catch (e) {
-      // Not a swap transaction we can decode
-      return null;
+      return fallback;
     }
-    
-    if (!decodedData) return null;
-    
+
+    if (!decodedData) return fallback;
+
     const functionName = decodedData.name;
     const args = decodedData.args;
-    
-    // Handle different router types and methods  
+
     switch (dexType) {
-  case "uniswapv2":
-  case "sushiswapv2":
-  case "camelot":
-    return decodeV2Swap(functionName, args, dexType, tx.value);
-    
-  case "uniswapv3":
-  case "sushiswapv3":
-  case "pancakeswapv3":
-  case "ramsesv2": 
-    return decodeV3Swap(functionName, args, dexType, tx.value);
-    
-  case "uniswapv4":
-    return decodeUniswapV4Swap(functionName, args, dexType, tx.value);
-    
-  case "maverickv2":
-    return decodeMaverickV2Swap(functionName, args, dexType, tx.value);
-    
-  case "curve":
-    return decodeCurveSwap(functionName, args, dexType, tx.value, tx.to);
-    
-  default:
-    return null;
-}
+      case "uniswapv2":
+      case "sushiswapv2":
+      case "camelot":
+        return decodeV2Swap(functionName, args, dexType, tx.value) ?? fallback;
+
+      case "uniswapv3":
+      case "sushiswapv3":
+      case "pancakeswapv3":
+      case "ramsesv2":
+        return decodeV3Swap(functionName, args, dexType, tx.value) ?? fallback;
+
+      case "uniswapv4":
+        return decodeUniswapV4Swap(functionName, args, dexType, tx.value) ?? fallback;
+
+      case "maverickv2":
+        return decodeMaverickV2Swap(functionName, args, dexType, tx.value) ?? fallback;
+
+      case "curve":
+        return decodeCurveSwap(functionName, args, dexType, tx.value, tx.to) ?? fallback;
+
+      default:
+        return fallback;
+    }
+
   } catch (err) {
-    enhancedLogger.error(`Error decoding swap: ${err}`, {
-      botType: "scanner"
-    });
-    return null;
+    enhancedLogger.error(`Error decoding swap: ${err}`, { botType: "scanner" });
+    return fallback;
   }
 }
+
 
 /**
  * Decode Uniswap V2-style router transactions
@@ -156,7 +157,7 @@ function decodeV2Swap(
   value: ethers.BigNumber
 ): DecodedSwapTransaction | null {
   try {
-    const WETH = "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"; // WETH on Arbitrum
+    
     
     // Handle different swap functions
     switch (functionName) {
@@ -235,7 +236,7 @@ function decodeV3Swap(
   value: ethers.BigNumber
 ): DecodedSwapTransaction | null {
   try {
-    const WETH = "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"; // WETH on Arbitrum
+    
     
     // Handle different swap functions
     switch (functionName) {
@@ -454,43 +455,44 @@ export function decodeUniswapV4Swap(
 /**
  * Helper to decode UniswapV3 path bytes
  */
-function decodeV3Path(pathBytes: string): { token: string, fee: number }[] | null {
+function decodeV3Path(pathBytes: string): { token: string; fee: number }[] | null {
   try {
-    if (!pathBytes || pathBytes.length < 40) return null;
-    
-    const result = [];
-    let position = 2; // skip 0x
-    
-    // First token
-    let token = '0x' + pathBytes.substr(position, 40);
+    if (!pathBytes || !pathBytes.startsWith("0x") || pathBytes.length < 42) return null;
+
+    const result: { token: string; fee: number }[] = [];
+    let position = 2; // pula '0x'
+    const length = pathBytes.length;
+
+    let token = "0x" + pathBytes.slice(position, position + 40);
     position += 40;
-    
-    while (position + 6 < pathBytes.length) {
-      // Read fee
-      const fee = parseInt(pathBytes.substr(position, 6), 16);
-      position += 6;
-      
-      // Add previous token with its outgoing fee
-      result.push({ token, fee });
-      
-      // Read next token if we have enough bytes left
-      if (position + 40 <= pathBytes.length) {
-        token = '0x' + pathBytes.substr(position, 40);
-        position += 40;
+
+    while (position < length) {
+      if (position + 6 > length) {
+        return null;
       }
+
+      const feeHex = pathBytes.slice(position, position + 6);
+      const fee = parseInt(feeHex, 16);
+      position += 6;
+
+      result.push({ token, fee });
+
+      if (position + 40 > length) break;
+
+      token = "0x" + pathBytes.slice(position, position + 40);
+      position += 40;
     }
-    
-    // Add final token (without outgoing fee)
+
     result.push({ token, fee: 0 });
-    
+
     return result;
   } catch (err) {
-    enhancedLogger.error(`Error decoding V3 path: ${err}`, {
-      botType: "scanner"
-    });
+    enhancedLogger.error(`Error decoding V3 path: ${err}`, { botType: "scanner" });
     return null;
   }
 }
+
+
 
 function decodeMaverickPath(path: string): { tokenIn: string; tokenOut: string } {
   if (!path || path.length < 86) throw new Error("Invalid path");

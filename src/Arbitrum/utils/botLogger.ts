@@ -1,6 +1,6 @@
 
 import { enhancedLogger, createContextLogger } from './enhancedLogger';
-import { createClient } from '@supabase/supabase-js';
+
 
 // Types for our structured logging system
 export interface ModuleStatus {

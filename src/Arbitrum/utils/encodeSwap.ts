@@ -1,27 +1,28 @@
 import { DexSwap, BuiltSwapCall } from "./types";
 import { ethers,BigNumber } from "ethers";
-import {uniswapv2,uniswapv3Router,uniswapv4Router,sushiswapv2Router,sushiswapv3Router,pancakeswapv3Router,curveRouter,ramsesv2Router,maverickv2Router,camelotRouter,} from "../constants/addresses";
-
+import {uniswapv2Router,uniswapv3Router,uniswapv4Router,sushiswapv2Router,sushiswapv3Router,pancakeswapv3Router,curveRouter,ramsesv2Router,maverickv2Router,camelotRouter,} from "../constants/addresses";
+import { EXECUTOR_CONTRACTARBITRUM } from "../constants/contracts";
 /// Uniswap V2 / Sushiswap V2 / Camelot (mesma ABI)
 const uniV2LikeAbi = [
   "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external",
 ];
+const recipient = EXECUTOR_CONTRACTARBITRUM
 
 export async function buildUniswapV2Swap(swap: DexSwap): Promise<BuiltSwapCall> {
   try {
-    const router = new ethers.Contract(uniswapv2, uniV2LikeAbi);
-
+    const router = new ethers.Contract(uniswapv2Router, uniV2LikeAbi);
+  
 
     const callData = router.interface.encodeFunctionData("swapExactTokensForTokens", [
       swap.amountIn,
       swap.amountOutMin,
       [swap.tokenIn, swap.tokenOut],
-      swap.recipient,
+      recipient,
       Math.floor(Date.now() / 1000) + 60,
     ]);
 
     return {
-      to: router.address,
+      to: uniswapv2Router,
       data: callData,
       value: BigNumber.from(0), 
     };
@@ -39,12 +40,12 @@ export async function buildSushiswapV2Swap(swap: DexSwap): Promise<BuiltSwapCall
       swap.amountIn,
       swap.amountOutMin,
       [swap.tokenIn, swap.tokenOut],
-      swap.recipient,
+      recipient,
       Math.floor(Date.now() / 1000) + 60,
     ]);
 
     return {
-      to: router.address,
+      to: sushiswapv2Router,
       data: callData,
       value: BigNumber.from(0),
     };
@@ -58,18 +59,19 @@ export async function buildSushiswapV2Swap(swap: DexSwap): Promise<BuiltSwapCall
 export async function buildCamelotSwap(swap: DexSwap): Promise<BuiltSwapCall> {
   try {
     const router = new ethers.Contract(camelotRouter, uniV2LikeAbi);
+    const recipient = new ethers.Contract(uniswapv2Router, uniV2LikeAbi);
 
     // Preparando os dados da transação
     const callData = router.interface.encodeFunctionData("swapExactTokensForTokens", [
       swap.amountIn,
       swap.amountOutMin,
       [swap.tokenIn, swap.tokenOut],
-      swap.recipient,
+      recipient,
       Math.floor(Date.now() / 1000) + 60,
     ]);
 
     return {
-      to: router.address,
+      to: camelotRouter,
       data: callData,
       value: BigNumber.from(0), 
     };
@@ -96,14 +98,14 @@ export async function buildUniswapV3Swap(swap: DexSwap): Promise<BuiltSwapCall> 
         tokenIn: swap.tokenIn,
         tokenOut: swap.tokenOut,
         fee: 3000,
-        recipient: swap.recipient,
+        recipient: recipient,
         amountIn: swap.amountIn,
         amountOutMin:swap.amountOutMin,
         sqrtPriceLimitX96: 0,}
     ]);
 
     return {
-      to: router.address,
+      to: uniswapv3Router,
       data: callData,
       value: BigNumber.from(0),
     };
@@ -123,7 +125,7 @@ export async function buildSushiswapV3Swap(swap: DexSwap): Promise<BuiltSwapCall
          tokenIn: swap.tokenIn,
         tokenOut: swap.tokenOut,
         fee: 3000,
-        recipient: swap.recipient,
+        recipient: recipient,
         amountIn: swap.amountIn,
         amountOutMin:swap.amountOutMin,
         sqrtPriceLimitX96: 0,
@@ -131,7 +133,7 @@ export async function buildSushiswapV3Swap(swap: DexSwap): Promise<BuiltSwapCall
     ]);
 
     return {
-      to: router.address,
+      to: sushiswapv3Router,
       data: callData,
       value: BigNumber.from(0),
     };
@@ -151,7 +153,7 @@ export async function buildPancakeswapV3Swap(swap: DexSwap): Promise<BuiltSwapCa
         tokenIn: swap.tokenIn,
         tokenOut: swap.tokenOut,
         fee: 3000,
-        recipient: swap.recipient,
+        recipient: recipient,
         amountIn: swap.amountIn,
         amountOutMin:swap.amountOutMin,
         sqrtPriceLimitX96: 0,
@@ -159,7 +161,7 @@ export async function buildPancakeswapV3Swap(swap: DexSwap): Promise<BuiltSwapCa
     ]);
 
     return {
-      to: router.address,
+      to: pancakeswapv3Router,
       data: callData,
       value: BigNumber.from(0),
     };
@@ -179,7 +181,7 @@ export async function buildRamsesV2Swap(swap: DexSwap): Promise<BuiltSwapCall> {
         tokenIn: swap.tokenIn,
         tokenOut: swap.tokenOut,
         fee: 3000,
-        recipient: swap.recipient,
+        recipient: recipient,
         amountIn: swap.amountIn,
         amountOutMin:swap.amountOutMin,
         sqrtPriceLimitX96: 0,
@@ -187,7 +189,7 @@ export async function buildRamsesV2Swap(swap: DexSwap): Promise<BuiltSwapCall> {
     ]);
 
     return {
-      to: router.address,
+      to: ramsesv2Router,
       data: callData,
       value: BigNumber.from(0),
     };
@@ -206,7 +208,6 @@ export async function buildUniswapV4Swap(swap: DexSwap): Promise<BuiltSwapCall> 
       tokenOut: toToken,
       amountIn,
       amountOutMin,
-      recipient,
       callbackRecipient = ethers.constants.AddressZero,
       sqrtPriceLimitX96 = 0
     } = swap;
@@ -215,8 +216,6 @@ export async function buildUniswapV4Swap(swap: DexSwap): Promise<BuiltSwapCall> 
       "function swap(address recipient, bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96, bytes hookData) external returns (int256 amount0, int256 amount1)"
     ]);
     const router = new ethers.Contract(uniswapv4Router, iface);
-
-    
 
     const [token0, token1] = [fromToken.toLowerCase(), toToken.toLowerCase()].sort();
     const zeroForOne = fromToken.toLowerCase() === token0;
@@ -235,7 +234,7 @@ export async function buildUniswapV4Swap(swap: DexSwap): Promise<BuiltSwapCall> 
     ]);
 
     return {
-      to: router.address,
+      to: uniswapv4Router,
       data: callData,
       value: BigNumber.from(0),
     };
@@ -263,22 +262,13 @@ export async function buildMaverickV2Swap(swap: DexSwap): Promise<BuiltSwapCall>
       swap.tokenIn,
       swap.tokenOut,
       swap.amountIn,
-      0, // amountOutMin: ajuste isso se quiser proteção contra slippage
-      swap.recipient,
+      swap.amountOutMin,
+      recipient,
     ]);
 
     return {
-      to: router.address,
+      to: maverickv2Router,
       data: callData,
-      value: BigNumber.from(0),
-    };
-  } catch (error) {
-    console.error("Erro ao gerar calldata MaverickV2:", error);
-
-    // fallback seguro para não retornar undefined
-    return {
-      to: ethers.constants.AddressZero,
-      data: "0x",
       value: BigNumber.from(0),
     };
   } catch (error) {
@@ -286,6 +276,7 @@ export async function buildMaverickV2Swap(swap: DexSwap): Promise<BuiltSwapCall>
     return fallbackSwapCall;
   }
 }
+
 
 const curveLikeAbi = [
   "function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy) external"
@@ -307,7 +298,7 @@ export async function buildCurveSwap(swap: DexSwap): Promise<BuiltSwapCall> {
     ]);
 
     return {
-      to: pool.address,
+      to: curveRouter,
       data: callData,
       value: BigNumber.from(0),
     };

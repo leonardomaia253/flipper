@@ -1,9 +1,10 @@
 import { ethers } from "ethers";
 import axios from "axios";
 import { LRUCache } from "lru-cache";
+import { WETH } from "../constants/addresses";
 
 // === Constantes ===
-const WETH_ADDRESS = "0x82af49447d8a07e3bd95bd0d56f35241523fbab1"; // Arbitrum WETH
+const WETH_ADDRESS = WETH
 const TIMEOUT = 3000;
 
 // === ERC20 Interface ===

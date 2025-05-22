@@ -1,42 +1,30 @@
 import { ethers, BigNumber } from "ethers";
 import pLimit from "p-limit";
-import { TokenInfo, QuoteResult,DexType } from "../../utils/types";
+import { TokenInfo, QuoteResult, DexType } from "../../utils/types";
 import { getGasCostInToken, estimateGasUsage } from "../../utils/gasEstimator";
 import { estimateSwapOutput } from "../../shared/utils/QuoteRouter";
 import { LRUCache } from "lru-cache";
 
-// Prioridade dos DEXs para consulta
-const DEX_PRIORITY = [
-  "uniswapv3",
-  "uniswapv2",
-  "sushiswapv3",
-  "sushiswapv2",
-  "camelot",
-  "pancakeswapv3",
-  "maverickv2",
-  "ramsesv2",
-  "uniswapv4",
-  "curve",
+// Configurações principais
+const DEX_PRIORITY: DexType[] = [
+  "uniswapv3", "uniswapv2", "sushiswapv3", "sushiswapv2",
+  "camelot", "pancakeswapv3", "maverickv2", "ramsesv2", "uniswapv4", "curve",
 ];
-
-// Configurações
 const MAX_HOPS = 3;
 const MAX_CONCURRENT_CALLS = 8;
-const SLIPPAGE = 0.005;  // 0.5%
-const MIN_PROFIT = 0.01; // em ETH
+const SLIPPAGE = 0.005;
+const MIN_PROFIT_ETH = 0.01;
 const CACHE_TTL_MS = 30_000;
 
+// Controle de concorrência
+const limit = pLimit(MAX_CONCURRENT_CALLS);
 
-
-// Cache LRU para quotes
+// Cache para cotações
+type QuoteCacheResult = { dex: DexType; amountOut: BigNumber; liquidity: BigNumber };
 const quoteCache = new LRUCache<string, { timestamp: number; result: QuoteCacheResult | null }>({
   max: 1000,
   ttl: CACHE_TTL_MS,
 });
-
-const limit = pLimit(MAX_CONCURRENT_CALLS);
-
-type QuoteCacheResult = { dex: string; amountOut: BigNumber; liquidity: BigNumber };
 
 type PathStep = {
   tokenIn: TokenInfo;
@@ -47,10 +35,7 @@ type PathStep = {
   liquidity?: BigNumber;
 };
 
-/**
- * Obtém a melhor cotação entre dois tokens usando múltiplos DEXs,
- * com cache para otimização.
- */
+// 🔍 Busca melhor cotação entre dois tokens em todos os DEXs
 async function getBestQuote(
   from: TokenInfo,
   to: TokenInfo,
@@ -60,47 +45,39 @@ async function getBestQuote(
   const cached = quoteCache.get(cacheKey);
   if (cached) return cached.result;
 
-  const quotePromises = DEX_PRIORITY.map((dex) =>
-    limit(async () => {
-      try {
-        const amountOut = await estimateSwapOutput(from.address, to.address, amountIn, dex);
-        if (amountOut.lte(0)) return null;
-        // Simulação simples de liquidez: amountOut * 10 (exemplo)
-        return { dex, amountOut, liquidity: amountOut.mul(10) };
-      } catch {
-        return null;
-      }
-    })
+  const results = await Promise.all(
+    DEX_PRIORITY.map((dex) =>
+      limit(async () => {
+        try {
+          const amountOut = await estimateSwapOutput(from.address, to.address, amountIn, dex);
+          if (amountOut.lte(0)) return null;
+          return { dex, amountOut, liquidity: amountOut.mul(10) }; // mock de liquidez
+        } catch {
+          return null;
+        }
+      })
+    )
   );
 
-  const quotes = (await Promise.all(quotePromises)).filter(
-    (q): q is QuoteCacheResult => q !== null
-  );
-
-  if (quotes.length === 0) {
+  const validQuotes = results.filter((q): q is QuoteCacheResult => q !== null);
+  if (!validQuotes.length) {
     quoteCache.set(cacheKey, { timestamp: Date.now(), result: null });
     return null;
   }
 
-  // Ordena para pegar o melhor output
-  quotes.sort((a, b) => {
-  if (a.amountOut.gt(b.amountOut)) return -1;
-  if (a.amountOut.lt(b.amountOut)) return 1;
-  return 0;
-});
-  const bestQuote = quotes[0];
+  // Prioriza maior liquidez → maior output
+  validQuotes.sort((a, b) => {
+    const liquidityDiff = b.liquidity.sub(a.liquidity);
+    return liquidityDiff.isZero() ? b.amountOut.sub(a.amountOut).toNumber() : liquidityDiff.toNumber();
+  });
 
+  const bestQuote = validQuotes[0];
   quoteCache.set(cacheKey, { timestamp: Date.now(), result: bestQuote });
   return bestQuote;
 }
 
-/**
- * Explora recursivamente rotas multi-hop para encontrar a mais lucrativa.
- */
-type ExploreResult = {
-  path: PathStep[];
-  amountOut: BigNumber;
-};
+// 🔁 Exploração recursiva de caminhos multi-hop
+type ExploreResult = { path: PathStep[]; amountOut: BigNumber };
 
 async function explorePaths(
   from: TokenInfo,
@@ -110,85 +87,58 @@ async function explorePaths(
   amountIn: BigNumber,
   hop: number
 ): Promise<ExploreResult | null> {
-  if (hop > MAX_HOPS) return null;
-  if (from.address === to.address) return null;
+  if (hop > MAX_HOPS || from.address === to.address) return null;
 
-  // Marca o token atual como visitado para evitar ciclos
   visited.add(from.address);
 
-  // Tenta a troca direta
-  const directQuote = await getBestQuote(from, to, amountIn);
+  let best: ExploreResult | null = null;
 
-  let bestResult: ExploreResult | null = null;
-
-  if (directQuote && directQuote.amountOut.gt(0)) {
-    bestResult = {
+  const direct = await getBestQuote(from, to, amountIn);
+  if (direct && direct.amountOut.gt(0)) {
+    best = {
       path: [{
         tokenIn: from,
         tokenOut: to,
-        dex: directQuote.dex,
+        dex: direct.dex,
         amountIn,
-        amountOut: directQuote.amountOut,
-        liquidity: directQuote.liquidity,
+        amountOut: direct.amountOut,
+        liquidity: direct.liquidity,
       }],
-      amountOut: directQuote.amountOut,
+      amountOut: direct.amountOut,
     };
   }
 
-  // Tenta multi-hop pelos tokens restantes (menos os visitados)
   for (const intermediate of tokens) {
-    if (visited.has(intermediate.address)) continue;
-    if (intermediate.address === to.address) continue;
+    if (visited.has(intermediate.address) || intermediate.address === to.address) continue;
 
-    // Cotação do primeiro salto
     const firstLeg = await getBestQuote(from, intermediate, amountIn);
-
     if (!firstLeg || firstLeg.amountOut.lte(0)) continue;
 
-    // Recursão para o próximo salto com o output do primeiro
     const nextLeg = await explorePaths(
-      intermediate,
-      to,
-      tokens,
-      new Set(visited), // Passa cópia para evitar alteração fora do escopo
-      firstLeg.amountOut,
-      hop + 1
+      intermediate, to, tokens, new Set(visited), firstLeg.amountOut, hop + 1
     );
-
     if (!nextLeg) continue;
 
-    const totalAmountOut = nextLeg.amountOut;
-    if (totalAmountOut.lte(0)) continue;
-
-    // Combina a rota
-    const candidatePath = [
-      {
-        tokenIn: from,
-        tokenOut: intermediate,
-        dex: firstLeg.dex,
-        amountIn,
-        amountOut: firstLeg.amountOut,
-        liquidity: firstLeg.liquidity,
-      },
-      ...nextLeg.path,
-    ];
-
-    // Se a nova rota é melhor, atualiza
-    if (!bestResult || totalAmountOut.gt(bestResult.amountOut)) {
-      bestResult = {
-        path: candidatePath,
-        amountOut: totalAmountOut,
+    const totalOut = nextLeg.amountOut;
+    if (totalOut.gt(best?.amountOut || BigNumber.from(0))) {
+      best = {
+        path: [{
+          tokenIn: from,
+          tokenOut: intermediate,
+          dex: firstLeg.dex,
+          amountIn,
+          amountOut: firstLeg.amountOut,
+          liquidity: firstLeg.liquidity,
+        }, ...nextLeg.path],
+        amountOut: totalOut,
       };
     }
   }
 
-  return bestResult;
+  return best;
 }
 
-
-/**
- * Encontra a melhor rota multi-hop de arbitragem a partir de um token base.
- */
+// 🚀 Busca melhor rota de arbitragem multi-hop
 export async function findBestMultiHopRoute({
   provider,
   baseToken,
@@ -201,49 +151,50 @@ export async function findBestMultiHopRoute({
   amountInRaw?: string;
 }) {
   const amountIn = ethers.utils.parseUnits(amountInRaw, baseToken.decimals);
+  const tokensToTry = tokenList.slice(0, 20);
 
-  // Filtra tokens (top 20) para reduzir complexidade
-  const filteredTokens = tokenList.slice(0, 20);
+  const start = Date.now();
+  const route = await explorePaths(baseToken, baseToken, tokensToTry, new Set(), amountIn, 1);
+  const durationMs = Date.now() - start;
 
-  const routeResult = await explorePaths(baseToken, baseToken, filteredTokens, new Set(), amountIn, 1);
+  if (!route || route.amountOut.lte(amountIn)) {
+    console.log(`[INFO] Sem rota lucrativa encontrada | tempo=${durationMs}ms`);
+    return null;
+  }
 
-  if (!routeResult || routeResult.amountOut.lte(amountIn)) return null;
+  const grossProfit = route.amountOut.sub(amountIn);
+  const routeTokens = route.path.map(p => p.tokenIn);
+  routeTokens.push(route.path[route.path.length - 1].tokenOut);
 
-  // Monta lista de tokens no caminho (evita duplicação)
-  const routeTokens = routeResult.path.map((step) => step.tokenIn);
-  routeTokens.push(routeResult.path[routeResult.path.length - 1].tokenOut);
-
-  const gasUsed = await estimateGasUsage(routeTokens.map((t) => t.address));
-  const gasCost = await getGasCostInToken({ provider, token: baseToken, gasUnits: gasUsed });
-
-  const grossProfit = routeResult.amountOut.sub(amountIn);
+  const gasEstimate = await estimateGasUsage(routeTokens.map(t => t.address));
+  const gasCost = await getGasCostInToken({ provider, token: baseToken, gasUnits: gasEstimate });
   const netProfit = grossProfit.sub(gasCost);
 
-  console.log(
-    `[Rota: ${routeTokens.map((t) => t.symbol).join(" → ")}] Bruto: ${ethers.utils.formatUnits(grossProfit, baseToken.decimals)} | Líquido: ${ethers.utils.formatUnits(netProfit, baseToken.decimals)}`
-  );
+  console.log(`[ROTA] ${routeTokens.map(t => t.symbol).join(" → ")} | lucro bruto: ${ethers.utils.formatUnits(grossProfit, baseToken.decimals)} | líquido: ${ethers.utils.formatUnits(netProfit, baseToken.decimals)} | tempo: ${durationMs}ms`);
 
-  if (netProfit.lte(ethers.utils.parseUnits(MIN_PROFIT.toString(), baseToken.decimals))) return null;
+  const minProfit = ethers.utils.parseUnits(MIN_PROFIT_ETH.toString(), baseToken.decimals);
+  if (netProfit.lte(minProfit)) return null;
 
-  const amountOutMin = routeResult.amountOut
+  const amountOutMin = route.amountOut
     .mul(10000 - Math.round(SLIPPAGE * 10000))
     .div(10000)
     .toBigInt();
 
   const quote: QuoteResult = {
     amountIn: amountIn.toBigInt(),
-    amountOut: routeResult.amountOut.toBigInt(),
+    amountOut: route.amountOut.toBigInt(),
     amountOutMin,
-    estimatedGas: gasUsed.toBigInt(),
+    estimatedGas: gasEstimate.toBigInt(),
     path: routeTokens,
-    dex: routeResult.path.map((step) => step.dex).join("→"),
+    dex: route.path.map(step => step.dex).join("→"),
   };
 
   return {
-    route: routeResult.path,
+    route: route.path,
     quote,
     gasCost: gasCost.toBigInt(),
     netProfit: netProfit.toBigInt(),
     inputAmount: amountIn,
+    durationMs,
   };
 }

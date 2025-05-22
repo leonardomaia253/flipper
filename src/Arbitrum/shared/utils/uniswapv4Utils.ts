@@ -1,6 +1,8 @@
 // utils/uniswapV4Utils.ts
 import { BigNumber, Contract } from 'ethers';
 import { provider } from '../../config/provider';
+import { executorAddress, uniswapv4Router } from '../../constants/addresses';
+
 
 
 export const UNISWAP_V4_POOL_MANAGER_ABI = [
@@ -30,7 +32,7 @@ export const UNISWAP_V4_POOL_MANAGER_ABI = [
 ];
 
 
-const UNISWAP_V4_POOL_MANAGER = '0x4200000000000000000000000000000000000002'; // Exemplo: Arbitrum
+const UNISWAP_V4_POOL_MANAGER = uniswapv4Router; // Exemplo: Arbitrum
 
 const poolManager = new Contract(UNISWAP_V4_POOL_MANAGER, UNISWAP_V4_POOL_MANAGER_ABI, provider);
 
@@ -38,7 +40,7 @@ export async function getQuoteUniswapV4(from: string, to: string, amountIn: BigN
   try {
     const path = encodePath([from, to], [3000]); // taxa fixa por enquanto
     const result = await poolManager.callStatic.simulateSwap({
-      recipient: '0x0000000000000000000000000000000000000000', // dummy
+      recipient: executorAddress,
       amountSpecified: amountIn,
       zeroForOne: true,
       path,

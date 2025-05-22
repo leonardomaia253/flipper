@@ -2,7 +2,6 @@
 import { ethers } from "ethers";
 import { ReconnectingWebSocketProvider } from "../utils/websocketProvider";
 import { createBackupProviders, tryWithFallback } from "../utils/securityUtils";
-import { handleError } from "../utils/errorHandler";
 import { createContextLogger } from "../utils/enhancedLogger";
 import * as dotenv from "dotenv";
 import * as path from "path";

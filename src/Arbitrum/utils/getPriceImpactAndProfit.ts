@@ -34,6 +34,10 @@ async function getCachedGasPrice(provider: ethers.providers.Provider): Promise<B
   return cachedGasPrice;
 }
 
+interface Hop {
+  tokenIn: string;
+  fee: number;
+}
 
 // Helper para decodificar path multi-hop V3
 function decodePath(path: string) {
@@ -43,7 +47,7 @@ function decodePath(path: string) {
   const ADDRESS_SIZE = 20;
   const pathBuffer = Buffer.from(path.replace(/^0x/, ""), "hex");
 
-  const hops = [];
+  const hops: Hop[] = [];
   let offset = 0;
   while (offset < pathBuffer.length - ADDRESS_SIZE) {
     const tokenIn = "0x" + pathBuffer.slice(offset, offset + ADDRESS_SIZE).toString("hex");

@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",           // Ou superior, para suporte a features modernas
+    "module": "ESNext",           // Usa módulos ES (import/export)
+    "moduleResolution": "node",
+    "esModuleInterop": true,      // Para compatibilidade com módulos CommonJS
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "rootDir": "./src",
+    "resolveJsonModule": true,   // Para importar arquivos JSON com import
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*"]
+}

@@ -2,9 +2,10 @@
 import { Contract, BigNumber } from 'ethers';
 import { provider } from '../../config/provider';
 import { UNISWAP_V2_ROUTER_ABI } from '../../constants/abis';
+import { maverickv2Router } from '../../constants/addresses';
 
 // Endereço do roteador Maverick V2 (exemplo, confirme o endereço real)
-const MAVERICK_ROUTER_ADDRESS = '0xYourMaverickV2RouterAddressHere';
+const MAVERICK_ROUTER_ADDRESS = maverickv2Router;
 
 export const maverickRouter = new Contract(
   MAVERICK_ROUTER_ADDRESS,

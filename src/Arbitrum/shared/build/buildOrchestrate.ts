@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { CallData } from "../../utils/types";
+import { executorAddress } from "../../constants/addresses";
 
 // Constrói uma call para flashloan que executa uma sequência de operações
 export async function buildOrchestrateCall({
@@ -14,7 +15,6 @@ export async function buildOrchestrateCall({
   data: string;
   to: string;
 }> {
-  const executorAddress = "0xebc996030ad65e113ba2f03e55de080044b83dca";
   
   const iface = new ethers.utils.Interface([
     "function orchestrate((address provider, address token, uint256 amount)[],(address target, bytes data, bool requiresApproval, address approvalToken, uint256 approvalAmount)[])"

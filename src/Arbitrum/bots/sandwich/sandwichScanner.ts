@@ -1,122 +1,188 @@
-
 import { ethers, BigNumber } from "ethers";
+import * as dotenv from "dotenv";
+import * as path from "path";
+
 import { getDexList } from "../../utils/dexList";
 import { getPriceImpactAndProfit } from "../../utils/getPriceImpactAndProfit";
 import { enhancedLogger as log } from "../../utils/enhancedLogger";
 import { decodeSwap } from "../../utils/decodeSwap";
-import { buildFrontrunBundlelongo, buildFrontrunBundlecurto } from "./sandwichbuilder";
-import { selectFlashloanToken } from "../../utils/flashloanamount";
-import { executorAddress } from "../../constants/addresses";
+import { buildDynamicOrchestration } from "./sandwichbuilder";
 import { simulateTokenProfit } from "../../simulation/simulate";
 import { buildSwapToETHCall } from "../../shared/build/buildSwapResidual";
 import { buildUnwrapWETHCall } from "../../shared/build/UnwrapWETH";
-import { getWETHBalance } from "../../shared/build/BalanceOf";
+import { executorAddress, WETH } from "../../constants/addresses";
 import { sendBundle } from "../../executor/sendBundle";
-import * as dotenv from "dotenv";
-import * as path from "path";
+import { mirrorSwapTransactionToRoute } from "../../utils/mirrowedtransactions";
+import { TokenInfo, SwapStep } from "../../utils/types";
+import { buildOrchestrateCall } from "../../shared/build/buildOrchestrate";
+import { CallData } from "../../utils/types";
 
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
+// --- Constantes e configuração ---
+
 const WEBSOCKET_RPC_URL = process.env.WEBSOCKET_RPC_URL!;
+const PRIVATE_KEY = process.env.PRIVATE_KEY!;
 const DRY_RUN = process.env.DRY_RUN === "true";
+const MIN_PROFIT = ethers.utils.parseEther(process.env.MIN_PROFIT || "0.005");
 
 if (!WEBSOCKET_RPC_URL) throw new Error("Missing WEBSOCKET_RPC_URL in .env");
+if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY não definida no .env");
 
-function getDefaultSigner() {
-  const provider = new ethers.providers.WebSocketProvider(WEBSOCKET_RPC_URL);
-  const privateKey = process.env.PRIVATE_KEY!;
-  if (!privateKey) throw new Error("PRIVATE_KEY não definida no .env");
-  return new ethers.Wallet(privateKey, provider);
-}
+const currentBaseToken: TokenInfo = {
+  address: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+  symbol: "WETH",
+  decimals: 18,
+};
 
 const provider = new ethers.providers.WebSocketProvider(WEBSOCKET_RPC_URL);
-const signer = getDefaultSigner();
+const signer = new ethers.Wallet(PRIVATE_KEY, provider);
 
 const processedTxs = new Set<string>();
 const MAX_CACHE_SIZE = 10_000;
 
-const dexList = await getDexList();
-const DEX_ROUTER_ADDRESSES = dexList.map(addr => addr.toLowerCase());
+// --- Tipos auxiliares ---
+
+interface BundleTransaction {
+  signer: ethers.Wallet;
+  transaction: {
+    to: string;
+    data: string;
+    gasLimit: number;
+  };
+}
+
+// --- Funções utilitárias ---
+
+function cleanCache(txHash: string) {
+  processedTxs.add(txHash);
+  if (processedTxs.size > MAX_CACHE_SIZE) {
+    const [first] = processedTxs;
+    if (first) processedTxs.delete(first);
+  }
+}
+
+function shouldProcessTx(txHash: string): boolean {
+  return !processedTxs.has(txHash);
+}
+
+function buildBundle(txs: { to: string; data: string }[]): BundleTransaction[] {
+  return txs.map(tx => ({
+    signer,
+    transaction: { to: tx.to, data: tx.data, gasLimit: 500_000 },
+  }));
+}
+
+function isProfitSufficient(profit: BigNumber | null): boolean {
+  return !!profit && profit.gt(MIN_PROFIT);
+}
+
+async function processTransaction(txHash: string, dexList: string[]) {
+  if (!shouldProcessTx(txHash)) return;
+  cleanCache(txHash);
+
+  const tx = await provider.getTransaction(txHash);
+  if (!tx) return;
+
+  const to = tx.to?.toLowerCase();
+  if (!to || !dexList.includes(to)) return;
+
+  const priceImpactProfit = await getPriceImpactAndProfit(tx);
+  if (!priceImpactProfit) return;
+
+  const { priceImpact, estimatedProfit } = priceImpactProfit;
+  if (estimatedProfit.lte(ethers.utils.parseEther("0.01"))) return;
+
+  log.info(`🚀 Oportunidade detectada:\n  Tx: ${txHash}\n  DEX: ${to}\n  Impacto: ${priceImpact.toFixed(2)}%\n  Lucro potencial: ${ethers.utils.formatEther(estimatedProfit)} ETH`);
+
+  const decoded = await decodeSwap(tx);
+  if (!decoded) {
+    log.warn(`❌ Falha ao decodificar a transação ${txHash}, ignorando.`);
+    return;
+  }
+
+  const { route } = mirrorSwapTransactionToRoute(decoded, estimatedProfit);
+  const flashLoanToken = currentBaseToken.address;
+  const flashLoanAmount = decoded.amountIn.mul(102).div(100);
+
+  const orchestrationResult = await buildDynamicOrchestration({ steps: route, flashLoanToken, flashLoanAmount });
+  if (!orchestrationResult) {
+    log.error("❌ Erro ao montar a orquestração.");
+    return;
+  }
+
+  const profit = await simulateTokenProfit({
+    provider,
+    executorAddress,
+    tokenAddress: flashLoanToken,
+    orchestrationResult,
+  });
+
+  if (!isProfitSufficient(profit)) {
+    log.warn(`⛔️ Lucro simulado insuficiente: ${ethers.utils.formatEther(profit || BigNumber.from(0))} ETH`);
+    return;
+  }
+
+  const calls: CallData[] = [
+  
+    ...orchestrationResult.approveCalls.map(call => ({
+      to: call.to,
+      data: call.data,
+      requiresApproval: true,
+      approvalToken: call.approvalToken,
+      approvalAmount: call.approvalAmount,
+    })),
+    ...orchestrationResult.swapCalls.map(call => ({
+      to: call.to,
+      data: call.data,
+      requiresApproval: true,
+      approvalToken: call.to,  // provavelmente o token que está aprovando
+      approvalAmount: call.approvalAmount,
+    })),
+  
+      ];
+  
+      const atomic = await buildOrchestrateCall({
+         token: flashLoanToken,
+         amount: flashLoanAmount,
+         calls,
+  });
+
+  const swapRemainingTx = await buildSwapToETHCall({
+    tokenIn: flashLoanToken,
+    amountIn: profit!,
+    recipient: executorAddress,
+  });
+
+  const unwrapCall = buildUnwrapWETHCall({ wethAddress: WETH });
+
+  const orchestrationTxs = [
+    atomic,
+    swapRemainingTx,
+    unwrapCall,
+  ];
+
+  const bundleTxs = buildBundle(orchestrationTxs);
+
+  if (DRY_RUN) {
+    log.warn("🧪 DRY-RUN ativado: bundle não será enviado");
+    bundleTxs.forEach((tx, i) => {
+      log.info(`  ${i + 1}. ${JSON.stringify(tx, null, 2)}`);
+    });
+  } else {
+    await sendBundle(bundleTxs, provider);
+    log.info("✅ Bundle enviado com sucesso!");
+  }
+}
+
+// --- Execução principal ---
+
+const dexList = (await getDexList()).map(addr => addr.toLowerCase());
 
 log.info("⏳ Aguardando novas transações na mempool...");
 
-provider.on("pending", async (txHash) => {
-  if (processedTxs.has(txHash)) return;
-  processedTxs.add(txHash);
-  if (processedTxs.size > MAX_CACHE_SIZE) processedTxs.delete(processedTxs.values().next().value);
-
-  try {
-    const tx = await provider.getTransaction(txHash);
-    if (!tx?.to) return;
-
-    const to = tx.to.toLowerCase();
-    if (!DEX_ROUTER_ADDRESSES.includes(to)) return;
-
-    const { priceImpact, estimatedProfit } = await getPriceImpactAndProfit(tx);
-    if (estimatedProfit.lte(ethers.utils.parseEther("0.01"))) return;
-
-    log.info("🚀 Oportunidade detectada:");
-    log.info(`  Tx: ${txHash}`);
-    log.info(`  DEX: ${to}`);
-    log.info(`  Impacto: ${priceImpact.toFixed(2)}%`);
-    log.info(`  Lucro potencial: ${ethers.utils.formatEther(estimatedProfit)} ETH`);
-
-    const decoded = await decodeSwap(tx);
-    const flashloanData = await selectFlashloanToken(decoded);
-    if (!flashloanData) return;
-
-    const { flashLoanToken, flashLoanAmount } = flashloanData;
-
-    const orchestrateResult =
-      flashLoanToken.toLowerCase() === decoded.tokenIn.toLowerCase()
-        ? await buildFrontrunBundlecurto(decoded)
-        : await buildFrontrunBundlelongo({
-            ...decoded,
-            flashLoanToken,
-            flashLoanAmount,
-          });
-
-    const calls = Array.isArray(orchestrateResult) ? orchestrateResult : [orchestrateResult];
-    const profit = await simulateTokenProfit({
-      provider,
-      executorAddress,
-      tokenAddress: flashLoanToken,
-      calls,
-    });
-
-    const MIN_PROFIT = ethers.utils.parseEther(process.env.MIN_PROFIT || "0.005");
-
-    if (!profit || profit.lte(MIN_PROFIT)) {
-      log.warn(`⛔️ Lucro simulado insuficiente ou nulo: ${ethers.utils.formatEther(profit || 0)} ETH`);
-      return;
-    }
-
-    const SwapRemainingtx = await buildSwapToETHCall({
-      tokenIn: flashLoanToken,
-      amountIn: profit,
-      recipient: decoded.recipient,
-    });
-
-    const wethBalanceRaw = await getWETHBalance({ provider });
-    const wethBalance = ethers.BigNumber.isBigNumber(wethBalanceRaw)
-      ? wethBalanceRaw
-      : ethers.utils.parseEther(wethBalanceRaw);
-
-    const unwrapCall = buildUnwrapWETHCall({ amount: wethBalance });
-
-    const bundleTxs = [...calls, SwapRemainingtx, unwrapCall];
-
-    if (DRY_RUN) {
-      log.warn("🧪 DRY-RUN ativado: bundle não será enviado");
-      log.info("Bundle composto por:");
-      bundleTxs.forEach((tx, i) => {
-        log.info(`  ${i + 1}. ${JSON.stringify(tx, null, 2)}`);
-      });
-    } else {
-      await sendBundle(bundleTxs, provider);
-      log.info("✅ Bundle enviado com sucesso!");
-    }
-  } catch (err) {
+provider.on("pending", (txHash: string) => {
+  processTransaction(txHash, dexList).catch(err => {
     log.error(`Erro no processamento da tx ${txHash}: ${(err as Error).message}`);
-  }
+  });
 });

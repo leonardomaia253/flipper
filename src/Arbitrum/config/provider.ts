@@ -22,7 +22,7 @@ export function getProvider(): ethers.providers.JsonRpcProvider {
 export const TENDERLY_CONFIG = {
   account: "Volup",
   project: "project1",
-  accessKey: process.env.TENDERLY_ACCESS_KEY || "your-tenderly-key",
+  accessKey: process.env.TENDERLY_ACCESS_KEY || "xlY4N6Y4R2e0kXsdaff3uMmRRSvdeIb1",
 };
 
 // Flashbots configuration

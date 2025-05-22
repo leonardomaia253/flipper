@@ -1,19 +1,13 @@
 import { ethers } from "ethers";
+import { EXECUTOR_CONTRACTARBITRUM } from "../../constants/contracts";
 
-export function buildUnwrapWETHCall({
-  amount,
-}: {
-  amount: ethers.BigNumberish;
-}) {
+export function buildUnwrapWETHCall({ wethAddress }: { wethAddress: string }) {
   const iface = new ethers.utils.Interface([
-    "function withdraw(uint256 amount)",
+    "function unwrapAllWETH(address weth)"
   ]);
 
   return {
-    to: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
-    data: iface.encodeFunctionData("withdraw", [amount]),
-    requiresApproval: false,
-    approvalToken: ethers.constants.AddressZero,
-    approvalAmount: 0,
+    to: EXECUTOR_CONTRACTARBITRUM,
+    data: iface.encodeFunctionData("unwrapAllWETH", [wethAddress])
   };
 }

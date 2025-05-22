@@ -25,35 +25,33 @@ export async function buildSwapTransaction({
   tokenOut,
   amountOutMin,
   dex,
-  recipient,
 }: {
   tokenIn: string;
   tokenOut: string;
   amountIn: BigNumber;
   amountOutMin: BigNumber;
   dex: DexType;
-  recipient: string;
 }): Promise<BuiltSwapCall> {
   if (dex === 'uniswapv2') {
-    return buildUniswapV2Swap({ tokenIn, tokenOut, amountIn, amountOutMin, dex, recipient});
+    return buildUniswapV2Swap({ tokenIn, tokenOut, amountIn, amountOutMin, dex});
   } else if (dex === 'uniswapv3') {
-    return buildUniswapV3Swap({ tokenIn, tokenOut, amountIn, amountOutMin, dex, recipient });
+    return buildUniswapV3Swap({ tokenIn, tokenOut, amountIn, amountOutMin, dex });
   } else if (dex === 'uniswapv4') {
-    return buildUniswapV4Swap({ tokenIn, tokenOut, amountIn, amountOutMin, dex, recipient });
+    return buildUniswapV4Swap({ tokenIn, tokenOut, amountIn, amountOutMin, dex });
   } else if (dex === 'sushiswapv2') {
-    return buildSushiswapV2Swap({ tokenIn, tokenOut, amountIn, amountOutMin, dex, recipient });
+    return buildSushiswapV2Swap({ tokenIn, tokenOut, amountIn, amountOutMin, dex });
   } else if (dex === 'sushiswapv3') {
-    return buildSushiswapV3Swap({ tokenIn, tokenOut, amountIn, amountOutMin, dex, recipient });
+    return buildSushiswapV3Swap({ tokenIn, tokenOut, amountIn, amountOutMin, dex });
   } else if (dex === 'pancakeswapv3') {
-    return buildPancakeswapV3Swap({ tokenIn, tokenOut, amountIn, amountOutMin, dex, recipient });
+    return buildPancakeswapV3Swap({ tokenIn, tokenOut, amountIn, amountOutMin, dex });
   } else if (dex === 'curve') {
-    return buildCurveSwap({ tokenIn, tokenOut, amountIn, amountOutMin, dex, recipient });
+    return buildCurveSwap({ tokenIn, tokenOut, amountIn, amountOutMin, dex });
   } else if (dex === 'camelot') {
-    return buildCamelotSwap({ tokenIn, tokenOut, amountIn, amountOutMin, dex, recipient});
+    return buildCamelotSwap({ tokenIn, tokenOut, amountIn, amountOutMin, dex });
   } else if (dex === 'maverickv2') {
-    return buildMaverickV2Swap({ tokenIn, tokenOut, amountIn, amountOutMin, dex, recipient });
+    return buildMaverickV2Swap({ tokenIn, tokenOut, amountIn, amountOutMin, dex });
   } else if (dex === 'ramsesv2') {
-    return buildRamsesV2Swap({ tokenIn, tokenOut, amountIn, amountOutMin, dex, recipient});
+    return buildRamsesV2Swap({ tokenIn, tokenOut, amountIn, amountOutMin, dex });
   } else {
     throw new Error(`DEX '${dex}' não suportada`);
   }

@@ -1,0 +1,30 @@
+{
+  "name": "mev-bot",
+  "version": "1.0.0",
+  "description": "MEV Bot for monitoring and executing DeFi opportunities",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "arbitrage": "node src/Arbitrum/bots/arbitrage/index.js",
+    "frontrun": "node src/Arbitrum/bots/frontrun/frontrunwatcher.js",
+    "sandwich": "node src/Arbitrum/bots/sandwich/sandwichScanner.js",
+    "pofiter1": "node src/Arbitrum/bots/profiterone/index.js",
+    "profiter2": "node src/Arbitrum/bots/profitertwo/index.js",
+    "liquidation": "node src/Arbitrum/bots/liquidation/index.js"
+},
+  "dependencies": {
+    "axios": "^1.6.8",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.10.0",
+    "ws": "^8.13.0"
+  },
+  "keywords": [
+    "MEV",
+    "DeFi",
+    "bot",
+    "flashloan",
+    "arbitrage"
+  ],
+  "author": "",
+  "license": "MIT"
+}

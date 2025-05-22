@@ -24,24 +24,34 @@ const DEX_LIST_PRIORITY: DexType[] = [
 ];
 
 const MIN_PROFIT_THRESHOLD = 0.01; // em unidades do token base
+
+// Permite ajustar o batchSize externamente (default 20)
+const DEFAULT_BATCH_SIZE = 20;
 const MAX_CONCURRENT_CALLS = 10;
-const SLIPPAGE_TOLERANCE = 0.005; // 0.5%
 
 async function getQuoteFromDex(
   fromToken: string,
   toToken: string,
   amountIn: BigNumber,
-  dex: DexType
+  dex: DexType,
+  quoteCache: Map<string, EstimateSwapOutputResult>
 ): Promise<EstimateSwapOutputResult | null> {
+  const cacheKey = `${fromToken}-${toToken}-${amountIn.toString()}-${dex}`;
+  if (quoteCache.has(cacheKey)) {
+    return quoteCache.get(cacheKey)!;
+  }
+
   try {
     const output = await estimateSwapOutput(fromToken, toToken, amountIn, dex);
     if (output.isZero()) return null;
 
-    return {
+    const result = {
       output,
       paths: [fromToken, toToken],
       dex,
     };
+    quoteCache.set(cacheKey, result);
+    return result;
   } catch {
     return null;
   }
@@ -51,11 +61,12 @@ async function getBestQuoteAcrossDEXs(params: {
   tokenIn: string;
   tokenOut: string;
   amountIn: BigNumber;
+  quoteCache: Map<string, EstimateSwapOutputResult>;
 }): Promise<EstimateSwapOutputResult | null> {
   const limit = pLimit(MAX_CONCURRENT_CALLS);
 
   const quotePromises = DEX_LIST_PRIORITY.map((dex) =>
-    limit(() => getQuoteFromDex(params.tokenIn, params.tokenOut, params.amountIn, dex))
+    limit(() => getQuoteFromDex(params.tokenIn, params.tokenOut, params.amountIn, dex, params.quoteCache))
   );
 
   const quotes = await Promise.all(quotePromises);
@@ -69,18 +80,27 @@ async function getBestQuoteAcrossDEXs(params: {
   );
 }
 
+/**
+ * Slippage adaptativa baseada em liquidez simples:
+ * Quanto maior a liquidez, menor a slippage aplicada.
+ * Retorna percentual decimal (ex: 0.005 para 0.5%)
+ */
+
 export async function findBestArbitrageRoute({
   provider,
   baseToken,
   tokenList,
   amountInRaw = "1",
+  batchSize = DEFAULT_BATCH_SIZE,
+  enableDebugLog = false,
 }: {
   provider: ethers.providers.Provider;
   baseToken: TokenInfo;
   tokenList: TokenInfo[];
-  amountInRaw?: string; // valor em unidades do token base, ex: "1"
+  amountInRaw?: string;
+  batchSize?: number;
+  enableDebugLog?: boolean;
 }) {
-  const BATCH_SIZE = 20;
   const amountIn = ethers.utils.parseUnits(amountInRaw, baseToken.decimals);
 
   let bestRoute: {
@@ -98,29 +118,40 @@ export async function findBestArbitrageRoute({
   } | null = null;
 
   let maxNetProfit = ethers.BigNumber.from(0);
+  const quoteCache = new Map<string, EstimateSwapOutputResult>();
 
-  for (let i = 0; i < tokenList.length; i += BATCH_SIZE) {
-    const batch = tokenList.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < tokenList.length; i += batchSize) {
+    const batch = tokenList.slice(i, i + batchSize);
 
     const batchResults = await Promise.all(
       batch.map(async (intermediate) => {
         try {
           if (intermediate.address === baseToken.address) return null;
 
-          // base → intermediate
+          // Obtem o melhor quote para base -> intermediate
           const firstHopQuote = await getBestQuoteAcrossDEXs({
             tokenIn: baseToken.address,
             tokenOut: intermediate.address,
             amountIn,
+            quoteCache,
           });
 
           if (!firstHopQuote) return null;
 
-          // intermediate → base
+          // Slippage adaptativa para segundo hop
+          const slippageSecondHop = 50;
+
+          // Ajusta o amountIn do segundo hop considerando slippage da primeira perna
+          const amountInSecondHop = firstHopQuote.output
+            .mul(10000 - Math.floor(slippageSecondHop * 10000))
+            .div(10000);
+
+          // Obtem o melhor quote para intermediate -> base (usando amountIn aproximado)
           const secondHopQuote = await getBestQuoteAcrossDEXs({
             tokenIn: intermediate.address,
             tokenOut: baseToken.address,
-            amountIn: firstHopQuote.output,
+            amountIn: amountInSecondHop,
+            quoteCache,
           });
 
           if (!secondHopQuote) return null;
@@ -128,6 +159,17 @@ export async function findBestArbitrageRoute({
           const finalAmountOut = secondHopQuote.output;
           if (finalAmountOut.lte(amountIn)) return null;
 
+          const profit = finalAmountOut.sub(amountIn);
+
+          // Evita estimar gas se lucro bruto for pequeno
+          if (
+            profit.lte(
+              ethers.utils.parseUnits(MIN_PROFIT_THRESHOLD.toString(), baseToken.decimals)
+            )
+          )
+            return null;
+
+          // Estima gas e custo
           const gasEstimate = await estimateGasUsage([
             baseToken.address,
             intermediate.address,
@@ -140,19 +182,26 @@ export async function findBestArbitrageRoute({
             gasUnits: gasEstimate,
           });
 
-          const profit = finalAmountOut.sub(amountIn);
           const netProfit = profit.sub(gasCost);
 
-          const netProfitReadable = ethers.utils.formatUnits(netProfit, baseToken.decimals);
-          const grossProfitReadable = ethers.utils.formatUnits(profit, baseToken.decimals);
-          console.log(`[${baseToken.symbol}→${intermediate.symbol}→${baseToken.symbol}] | ${firstHopQuote.dex}→${secondHopQuote.dex} | Gross: ${grossProfitReadable} | Net: ${netProfitReadable}`);
+          if (enableDebugLog) {
+            const netProfitReadable = ethers.utils.formatUnits(netProfit, baseToken.decimals);
+            const grossProfitReadable = ethers.utils.formatUnits(profit, baseToken.decimals);
+            console.debug(
+              `[${baseToken.symbol}→${intermediate.symbol}→${baseToken.symbol}] | ${firstHopQuote.dex}→${secondHopQuote.dex} | Gross: ${grossProfitReadable} | Net: ${netProfitReadable}`
+            );
+          }
 
           if (
             netProfit.gt(maxNetProfit) &&
-            netProfit.gt(ethers.utils.parseUnits(MIN_PROFIT_THRESHOLD.toString(), baseToken.decimals))
+            netProfit.gt(
+              ethers.utils.parseUnits(MIN_PROFIT_THRESHOLD.toString(), baseToken.decimals)
+            )
           ) {
+            // Slippage adaptada para saída final
+            const slippageFinal =50;
             const amountOutMin = finalAmountOut
-              .mul(10000 - Math.floor(SLIPPAGE_TOLERANCE * 10000))
+              .mul(10000 - Math.floor(slippageFinal * 10000))
               .div(10000);
 
             const route = [
@@ -192,7 +241,9 @@ export async function findBestArbitrageRoute({
 
           return null;
         } catch (e) {
-          console.warn(`Erro ao processar token ${intermediate.symbol}:`, e);
+          if (enableDebugLog) {
+            console.warn(`Erro ao processar token ${intermediate.symbol}:`, e);
+          }
           return null;
         }
       })
@@ -205,10 +256,10 @@ export async function findBestArbitrageRoute({
       }
     }
   }
-  
-if (!bestRoute) {
-  throw new Error("Nenhuma rota de arbitragem encontrada.");
-}
 
-return bestRoute;
+  if (!bestRoute) {
+    throw new Error("Nenhuma rota de arbitragem encontrada.");
+  }
+
+  return bestRoute;
 }

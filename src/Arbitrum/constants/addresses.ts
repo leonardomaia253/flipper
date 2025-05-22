@@ -60,7 +60,7 @@ export const LENDING_PROTOCOL_ADDRESSES = {
   compound: "0xaa273216cc9201a1e4285ca623f584badc736944",
 };
 
-export const uniswapv2="0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24";
+export const uniswapv2Router="0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24";
 export const uniswapv3Router="0xE592427A0AEce92De3Edee1F18E0157C05861564";
 export const uniswapv4Router="0xA51afAFe0263b40EdaEf0Df8781eA9aa03E381a3";
 export const sushiswapv2Router="0xA7caC4207579A179c1069435d032ee0F9F150e5c";
@@ -117,7 +117,7 @@ export const MEV_RELATED = {
 };
 
 // Executor contract address
-export const executorAddress = "0xebc996030ad65e113ba2f03e55de080044b83dca";
+export const executorAddress = "0x093AdfEcd56C5215378124fcC66e35d4e102F04f";
 
 export const CHAINLINK_FEEDS: Record<string, string> = {
   // Token: Feed (em Arbitrum)

@@ -1,6 +1,7 @@
 import { BigNumber } from 'ethers';
 import { Contract } from 'ethers';
 import { provider } from '../../config/provider';
+import { sushiswapv3Router } from '../../constants/addresses';
 
 export const SUSHISWAP_V3_QUOTER_ADDRESS = '0x2D99A...';
 

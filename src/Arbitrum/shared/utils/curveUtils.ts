@@ -1,9 +1,9 @@
 import { BigNumber, Contract } from 'ethers';
 import { CURVE_POOL_ABI } from '../../constants/abis';
 import { provider } from '../../config/provider';
+import { curveRouter } from '../../constants/addresses';
 
-const CURVE_POOL_ADDRESS = '0xDC24316b9AE028F1497c275EB9192a3Ea0f67022'; // exemplo: stETH/ETH pool
-
+const CURVE_POOL_ADDRESS = curveRouter; 
 export const curvePool = new Contract(
   CURVE_POOL_ADDRESS,
   CURVE_POOL_ABI,
