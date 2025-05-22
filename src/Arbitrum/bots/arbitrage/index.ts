@@ -1,5 +1,5 @@
 import { ethers, Wallet } from "ethers";
-import { buildDynamicOrchestration } from "./arbitragebuilder.ts";
+import { buildDynamicOrchestration } from "./arbitragebuilder";
 import { fetchTopTokensArbitrum } from "../../utils/tokensdefi";
 import { findBestArbitrageRoute } from "./arbitrageScanner";
 import { TokenInfo } from "../../utils/types";
