@@ -2,7 +2,7 @@
   "name": "mev-bot",
   "version": "1.0.0",
   "description": "MEV Bot for monitoring and executing DeFi opportunities",
-  "type": "module",
+  "type": "commonjs",
   "main": "src/index.ts",
   "scripts": {
     "arbitrage": "node --loader ts-node/esm --no-warnings src/Arbitrum/bots/arbitrage/index.ts",
