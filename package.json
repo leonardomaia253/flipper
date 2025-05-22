@@ -5,12 +5,12 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "arbitrage": "node src/Arbitrum/bots/arbitrage/index.ts",
-    "frontrun": "node src/Arbitrum/bots/frontrun/frontrunwatcher.ts",
-    "sandwich": "node src/Arbitrum/bots/sandwich/sandwichScanner.ts",
-    "pofiter1": "node src/Arbitrum/bots/profiterone/index.ts",
-    "profiter2": "node src/Arbitrum/bots/profitertwo/index.ts",
-    "liquidation": "node src/Arbitrum/bots/liquidation/index.ts"
+    "arbitrage": "npx ts-node src/Arbitrum/bots/arbitrage/index.ts",
+    "frontrun": "npx ts-node src/Arbitrum/bots/frontrun/frontrunwatcher.ts",
+    "sandwich": "npx ts-node src/Arbitrum/bots/sandwich/sandwichScanner.ts",
+    "pofiter1": "npx ts-nodes rc/Arbitrum/bots/profiterone/index.ts",
+    "profiter2": "npx ts-node src/Arbitrum/bots/profitertwo/index.ts",
+    "liquidation": "npx ts-node src/Arbitrum/bots/liquidation/index.ts"
 },
   "dependencies": {
     "axios": "^1.6.8",
