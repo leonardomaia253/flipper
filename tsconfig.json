@@ -1,14 +1,15 @@
 {
   "compilerOptions": {
-    "target": "ES2020",           // Ou superior, para suporte a features modernas
-    "module": "ESNext",           // Usa módulos ES (import/export)
+    "target": "ES2020",
+    "module": "CommonJS",
     "moduleResolution": "node",
-    "esModuleInterop": true,      // Para compatibilidade com módulos CommonJS
-    "allowSyntheticDefaultImports": true,
-    "strict": true,
+    "outDir": "./dist",
     "rootDir": "./src",
-    "resolveJsonModule": true,   // Para importar arquivos JSON com import
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "strict": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*"],
+  "exclude": ["dist"]
 }
