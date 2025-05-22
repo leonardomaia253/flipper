@@ -3,14 +3,14 @@
   "version": "1.0.0",
   "description": "MEV Bot for monitoring and executing DeFi opportunities",
   "type": "module",
-  "main": "src/index.js",
+  "main": "src/index.ts",
   "scripts": {
-    "arbitrage": "node src/Arbitrum/bots/arbitrage/index.js",
-    "frontrun": "node src/Arbitrum/bots/frontrun/frontrunwatcher.js",
-    "sandwich": "node src/Arbitrum/bots/sandwich/sandwichScanner.js",
-    "pofiter1": "node src/Arbitrum/bots/profiterone/index.js",
-    "profiter2": "node src/Arbitrum/bots/profitertwo/index.js",
-    "liquidation": "node src/Arbitrum/bots/liquidation/index.js"
+    "arbitrage": "node src/Arbitrum/bots/arbitrage/index.ts",
+    "frontrun": "node src/Arbitrum/bots/frontrun/frontrunwatcher.ts",
+    "sandwich": "node src/Arbitrum/bots/sandwich/sandwichScanner.ts",
+    "pofiter1": "node src/Arbitrum/bots/profiterone/index.ts",
+    "profiter2": "node src/Arbitrum/bots/profitertwo/index.ts",
+    "liquidation": "node src/Arbitrum/bots/liquidation/index.ts"
 },
   "dependencies": {
     "axios": "^1.6.8",
