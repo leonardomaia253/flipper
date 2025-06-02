@@ -7,8 +7,8 @@ const ERC20_ABI = [
 ];
 
 export function buildApproveCall(token: string, spender: string, amount?: string): Call {
-  const iface = new ethers.utils.Interface(ERC20_ABI);
-  const approveAmount = amount ?? ethers.constants.MaxUint256.toString();
+  const iface = new ethers.Interface(ERC20_ABI);
+  const approveAmount = amount ?? ethers.MaxUint256.toString();
   const data = iface.encodeFunctionData("approve", [spender, approveAmount]);
 
   return {

@@ -1,19 +1,13 @@
 import { ethers } from "ethers";
+import { EXECUTOR_CONTRACTETHEREUM } from "../../constants/contracts";
 
-export function buildUnwrapWETHCall({
-  amount,
-}: {
-  amount: ethers.BigNumberish;
-}) {
-  const iface = new ethers.utils.Interface([
-    "function withdraw(uint256 amount)",
+export function buildUnwrapWETHCall({ wethaddress }: { wethaddress: string }) {
+  const iface = new ethers.Interface([
+    "function unwrapAllWETH(address weth)"
   ]);
 
   return {
-    to: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
-    data: iface.encodeFunctionData("withdraw", [amount]),
-    requiresApproval: false,
-    approvalToken: ethers.constants.AddressZero,
-    approvalAmount: 0,
+    to: EXECUTOR_CONTRACTETHEREUM,
+    data: iface.encodeFunctionData("unwrapAllWETH", [wethaddress])
   };
 }

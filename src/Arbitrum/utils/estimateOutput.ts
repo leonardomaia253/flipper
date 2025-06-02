@@ -1,134 +1,116 @@
-import { ethers } from "ethers";
-import { getProvider } from "../constants/config"; // customizada por rede
-import { DEX_ROUTER } from "../constants/addresses";
+import { ethers, BigNumberish } from "ethers";
+import { findPool } from "./findPool";
+import { hasSufficientLiquidity } from "./liquiditychecker";
+import { POOL_ABIS } from "../constants/abis";
+import { multiprovider } from "../config/provider";
 import { DexType } from "./types";
-
-const provider = getProvider();
-
-
-const MaverickQuoterABI = [
-  "function quoteExactInputSingle(address tokenIn, address tokenOut, uint256 amountIn) view returns (uint256 amountOut)"
-];
-
-const UniswapV4RouterABI = [
-  "function quote(address tokenIn, address tokenOut, uint256 amountIn) view returns (uint256 amountOut)"
-];
-
-const UniswapV3QuoterABI = [
-  {
-    "inputs": [
-      { "internalType": "bytes", "name": "path", "type": "bytes" },
-      { "internalType": "uint256", "name": "amountIn", "type": "uint256" }
-    ],
-    "name": "quoteExactInput",
-    "outputs": [
-      { "internalType": "uint256", "name": "amountOut", "type": "uint256" }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  }
-];
-
-const UniswapV2RouterABI = [
-  "function getAmountsOut(uint amountIn, address[] calldata path) view returns (uint[] memory)"
-];
-
-
-const CurveRegistryV2ABI = [
-  "function find_pool_for_coins(address from, address to) view returns (address pool)",
-  "function get_coin_indices(address pool, address from, address to) view returns (int128, int128, bool)"
-];
-
-const CurvePoolABI = [
-  "function get_dy(int128 i, int128 j, uint256 dx) view returns (uint256)"
-];
-
-// Endereço do Address Provider Curve - exemplo Arbitrum (mude se estiver em outra chain)
-const CURVE_ADDRESS_PROVIDER = "0x0000000022D53366457F9d5E68Ec105046FC4383";
-
-// Helper para UniswapV3-style paths
-function encodeUniswapV3Path(path: string[], fees: number[]): string {
-  let encoded = "0x";
-  for (let i = 0; i < path.length - 1; i++) {
-    encoded += path[i].slice(2);
-    encoded += fees[i].toString(16).padStart(6, "0");
-  }
-  encoded += path[path.length - 1].slice(2);
-  return encoded;
-}
+import { DEX_QUOTERS } from "../constants/addresses";
 
 export async function estimateSwapOutput(
   tokenIn: string,
   tokenOut: string,
-  amountIn: ethers.BigNumber,
-  dex: DexType
-): Promise<ethers.BigNumber> {
-  const lowerDex = dex.toLowerCase();
+  amountIn: BigNumberish,
+  dex: DexType,
+  fee: number = 3000,
+  extraParams?: any // para Uniswap V4 ou outros casos
+): Promise<BigNumberish> {
+  const pool = await findPool(tokenIn, tokenOut, dex, fee);
 
-  try {
-    // V2-style routers
-    if (["uniswapv2", "sushiswapv2", "ramsesv2","camelot"].includes(lowerDex)) {
-      const router = new ethers.Contract(DEX_ROUTER[dex], UniswapV2RouterABI, provider);
-      const amountsOut = await router.getAmountsOut(amountIn, [tokenIn, tokenOut]);
-      return amountsOut[1];
-    }
-
-    if (["uniswapv4"].includes(lowerDex)) {
-      const router = new ethers.Contract(DEX_ROUTER[dex], UniswapV4RouterABI, provider);
-      const amountsOut = await router.quote(amountIn, [tokenIn, tokenOut]);
-      return amountsOut[1];
-    }
-
-    // V3/V4 with Quoter
-    if (["uniswapv3", "sushiswapv3", "pancakeswapv3"].includes(lowerDex)) {
-      const quoter = new ethers.Contract("0x61fFE014bA17989E743c5F6cB21bF9697530B21e", UniswapV3QuoterABI, provider);
-      const path = encodeUniswapV3Path([tokenIn, tokenOut], [3000]); // assume fee de 0.3%
-      const amountsOut = await quoter.callStatic.quoteExactInput(path, amountIn);
-      return amountsOut.amountOut || amountsOut; // alguns retornam só o número
-    }
-
-    if (["maverickv2"].includes(lowerDex)) {
-      const quoter = new ethers.Contract(DEX_ROUTER[dex], MaverickQuoterABI, provider);
-      const path = encodeUniswapV3Path([tokenIn, tokenOut], [3000]); // assume fee de 0.3%
-      const amountsOut = await quoter.callStatic.quoteExactInput(path, amountIn);
-      return amountsOut.amountOut || amountsOut; // alguns retornam só o número
-    }
-
-    // Curve (exige índice dos tokens)
-      if (lowerDex === "curve") {
-    // Instancia o address provider Curve
-    const addressProvider = new ethers.Contract(CURVE_ADDRESS_PROVIDER, CurveRegistryV2ABI, provider);
-
-    // Pega o registry (V2)
-    const registryAddress = await addressProvider.get_registry();
-    const registry = new ethers.Contract(registryAddress, CurveRegistryV2ABI, provider);
-
-    // Busca o pool correto para o par de tokens
-    const poolAddress = await registry.find_pool_for_coins(tokenIn, tokenOut);
-    if (poolAddress === ethers.constants.AddressZero) {
-      throw new Error("Curve pool not found for token pair");
-    }
-
-    // Consulta índices dos tokens no pool
-    const [iRaw, jRaw, success] = await registry.get_coin_indices(poolAddress, tokenIn, tokenOut);
-    if (!success) {
-      throw new Error("Tokens pair not found in Curve pool");
-    }
-    const i = iRaw; // int128 no ethers é BigNumber
-    const j = jRaw;
-
-    // Instancia o pool
-    const pool = new ethers.Contract(poolAddress, CurvePoolABI, provider);
-
-    // Chama get_dy para estimar saída
-    const amountOut = await pool.get_dy(i, j, amountIn);
-
-    return amountOut;
+  if (pool === ethers.ZeroAddress) {
+    console.warn(`Nenhum pool encontrado para ${dex}: ${tokenIn}/${tokenOut}`);
+    return ethers.toBigInt(0);
   }
 
-    throw new Error(`DEX ${dex} não suportado`);
-  } catch (err) {
-    console.warn(`[estimateSwapOutput] Falha ao estimar para ${dex}:`, err);
-    return ethers.BigNumber.from(0);
+  const hasLiquidity = await hasSufficientLiquidity(pool, tokenIn, tokenOut, dex, extraParams);
+  if (!hasLiquidity) {
+    console.warn(`Sem liquidez suficiente no pool ${pool} para ${dex}: ${tokenIn}/${tokenOut}`);
+    return ethers.toBigInt(0);
+  }
+
+  const dexLower = dex.toLowerCase();
+
+  function getContract(address: string, abi: any[]) {
+    return new ethers.Contract(address, abi, multiprovider);
+  }
+
+  try {
+    // ======================== Uniswap V2-like ========================
+    if (["uniswapv2", "sushiswapv2", "camelot"].includes(dexLower)) {
+      const poolContract = getContract(pool, POOL_ABIS.UNISWAP_V2);
+
+      let reserve0: bigint;
+      let reserve1: bigint;
+      let token0: string;
+      let token1: string;
+
+      try {
+        [reserve0, reserve1] = await poolContract.getReserves();
+      } catch (e) {
+        console.error(`Erro ao buscar reservas do pool ${pool} em ${dex}:`, e);
+        return ethers.toBigInt(0);
+      }
+
+      try {
+        token0 = await poolContract.token0();
+      } catch (e) {
+        console.error(`Erro ao buscar token0 do pool ${pool} em ${dex}:`, e);
+        return ethers.toBigInt(0);
+      }
+
+      try {
+        token1 = await poolContract.token1();
+      } catch (e) {
+        console.error(`Erro ao buscar token1 do pool ${pool} em ${dex}:`, e);
+        return ethers.toBigInt(0);
+      }
+
+      let reserveIn: bigint;
+      let reserveOut: bigint;
+
+      if (tokenIn.toLowerCase() === token0.toLowerCase()) {
+        reserveIn = reserve0;
+        reserveOut = reserve1;
+      } else {
+        reserveIn = reserve1;
+        reserveOut = reserve0;
+      }
+
+      const amountInBig = BigInt(amountIn);
+      const amountInWithFee = amountInBig * 997n;
+      const numerator = amountInWithFee * reserveOut;
+      const denominator = reserveIn * 1000n + amountInWithFee;
+
+      return numerator / denominator;
+    }
+
+    // ======================== Uniswap V3-like ========================
+    if (["uniswapv3", "sushiswapv3", "pancakeswapv3", "ramsesv2"].includes(dexLower)) {
+      const quoteraddress = DEX_QUOTERS[dex];
+      const QUOTER_ABI = [
+        "function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) external returns (uint256 amountOut)"
+      ];
+
+      const quoter = getContract(quoteraddress, QUOTER_ABI);
+
+      try {
+        const amountOut = await quoter.quoteExactInputSingle(
+          tokenIn,
+          tokenOut,
+          fee,
+          amountIn,
+          0
+        );
+        return ethers.toBigInt(amountOut);
+      } catch (e) {
+        console.error(`Erro ao chamar quoteExactInputSingle para ${dex}:`, e);
+        return ethers.toBigInt(0);
+      }
+    }
+
+    console.warn(`DEX ${dex} não suportado ainda na estimateSwapOutput`);
+    return ethers.toBigInt(0);
+  } catch (error) {
+    console.error(`Erro geral ao estimar swap para ${dex}:`, error);
+    return ethers.toBigInt(0);
   }
 }

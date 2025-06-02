@@ -1,7 +1,7 @@
 import axios from 'axios';
 import {TokenInfo} from "./types"
 
-export async function getArbitrumTokens(): Promise<TokenInfo[]> {
+export async function getEthererumTokens(): Promise<TokenInfo[]> {
   try {
     const response = await axios.get('https://api.llama.fi/protocols');
     const protocols = response.data;
@@ -9,10 +9,10 @@ export async function getArbitrumTokens(): Promise<TokenInfo[]> {
     const arbitrumTokens: TokenInfo[] = [];
 
     for (const protocol of protocols) {
-      if (protocol.chains.includes('Arbitrum')) {
+      if (protocol.chains.includes('Ethererum')) {
         // Supondo que cada protocolo tenha uma lista de tokens com informações detalhadas
         for (const token of protocol.tokens || []) {
-          if (token.chain === 'Arbitrum') {
+          if (token.chain === 'Ethererum') {
             arbitrumTokens.push({
               address: token.address,
               symbol: token.symbol,

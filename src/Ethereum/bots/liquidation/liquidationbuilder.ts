@@ -1,152 +1,246 @@
-
+import { estimateSwapOutput } from "../../utils/estimateOutput";
 import { ethers } from "ethers";
-import { buildOrchestrateCall } from "../../shared/build/buildOrchestrate";
-import { encodePayMiner } from "../../shared/build/payMinerCall";
-import { CallData, DexType, AccountHealthData, LiquidationBundleParams, ProtocolType } from "../../utils/types";
+import { CallData, BuildLiquidationOrchestrationOptions } from "../../utils/types";
+import { BigNumberish } from "ethers";
+import { DEX_ROUTER, uniswapv3Router } from "../../constants/addresses";
 import { buildSwapTransaction } from "../../shared/build/buildSwap";
-import { getLiquidationCallData } from "../../shared/build/buildLiquidationCall";
+import { ERC20_ABI } from '../../constants/abis';
+import { estimateCollateralReceived } from "../../utils/estimaterepaybonus";
 
-// Define the LENDING_PROTOCOL_ADDRESSES if it's missing
-const LENDING_PROTOCOL_ADDRESSES: Record<ProtocolType, string> = {
-  "aave": "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
-  "compound": "0x5345B5f4f3bFf1F4C1A2aFf3Ff1F4C1A2aFf3Ff1",
-  "morpho": "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb",
-  "spark": "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb",
-  "venus": "0x5345B5f4f3bFf1F4C1A2aFf3Ff1F4C1A2aFf3Ff1",
-  "abracadabra": "0x5345B5f4f3bFf1F4C1A2aFf3Ff1F4C1A2aFf3Ff1",
-  "radiant": "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
-  "llamalend": "0x5345B5f4f3bFf1F4C1A2aFf3Ff1F4C1A2aFf3Ff1",
-  "creamfinance": "0x5345B5f4f3bFf1F4C1A2aFf3Ff1F4C1A2aFf3Ff1",
-  "ironbank": "0x5345B5f4f3bFf1F4C1A2aFf3Ff1F4C1A2aFf3Ff1"
-};
+const erc20Interface = new ethers.Interface(ERC20_ABI);
 
-export async function prepareAndBuildLiquidationCall(
-  healthData: AccountHealthData,
-  signer: ethers.Signer,
-  protocol: LiquidationBundleParams["protocol"]
-) {
-  const debtAsset = healthData.debt[0]; // escolha a dívida mais relevante
-  const collateralAsset = healthData.collateral[0]; // idem para colateral
+async function detectCollateralType(tokenAddress: string, provider: ethers.JsonRpcProvider): Promise<"cToken" | "aToken" | "erc20"> {
+  const cTokenInterface = new ethers.Interface([
+    "function exchangeRateStored() view returns (uint256)",
+    "function underlying() view returns (address)"
+  ]);
 
-  const params: LiquidationBundleParams = {
-    signer,
-    collateralAsset: collateralAsset.token,
-    debtAsset: debtAsset.token,
-    userToLiquidate: healthData.user,
-    amountToRepay: ethers.utils.parseUnits(
-      debtAsset.amount.toString(),
-      debtAsset.decimals || 18
-    ).toString(),
-    expectedProfitToken: collateralAsset.token, // ou outro token de destino
-    flashLoanToken: debtAsset.token,
-    flashLoanAmount: ethers.utils.parseUnits(
-      debtAsset.amount.toString(),
-      debtAsset.decimals || 18
-    ).toString(),
-    minerReward: "0", // ou calcule dinamicamente
-    protocol,
-  };
+  const aTokenInterface = new ethers.Interface([
+    "function UNDERLYING_ASSET_ADDRESS() view returns (address)"
+  ]);
 
-  const bundle = await buildLiquidationBundle(params);
-  return bundle;
+  try {
+    await provider.call({
+      to: tokenAddress,
+      data: cTokenInterface.encodeFunctionData("exchangeRateStored")
+    });
+    return "cToken";
+  } catch {}
+
+  try {
+    await provider.call({
+      to: tokenAddress,
+      data: aTokenInterface.encodeFunctionData("UNDERLYING_ASSET_ADDRESS")
+    });
+    return "aToken";
+  } catch {}
+
+  return "erc20";
 }
 
-export async function buildLiquidationBundle({
-  signer,
-  collateralAsset,
-  debtAsset,
-  userToLiquidate,
-  amountToRepay,
-  expectedProfitToken,
+export async function buildLiquidationOrchestration({
   flashLoanToken,
   flashLoanAmount,
-  minerReward,
+  liquidatorContract,
+  borrower,
+  repayToken,
+  collateralToken,
+  slippageBps = 30,
+  liquidationBonusBps = 500, // ✅ Aqui coloca valor padrão: 5%
+  provider,
   protocol,
-}: LiquidationBundleParams): Promise<CallData> {
-  const defaultDex: DexType = "uniswapv3"; 
-  const protocolAddress = LENDING_PROTOCOL_ADDRESSES[protocol as ProtocolType];
-  const dexRouterAddress = "0xE592427A0AEce92De3Edee1F18E0157C05861564"; // Uniswap V3 Router
-    
-  if (!dexRouterAddress) throw new Error(`[builder] Router address not found for DEX: ${defaultDex}`);
+}: BuildLiquidationOrchestrationOptions & { provider: ethers.JsonRpcProvider; liquidationBonusBps?: number }): Promise<{
+  approveCalls: CallData[];
+  liquidationCall: CallData;
+  postSwapCalls: CallData[];
+}> {
+  const approveCache = new Set<string>();
+  const approveCalls: CallData[] = [];
+  const postSwapCalls: CallData[] = [];
 
-  // 1. Get liquidation call
-  const liquidationCallRes = await getLiquidationCallData({
-    protocol: protocol,
-    params: {
-      collateralAsset,
-      debtAsset,
-      user: userToLiquidate,
-      amount: ethers.BigNumber.from(amountToRepay),
-      receiveAToken: false
+  let repayAmount = flashLoanAmount;
+
+  // --- Pré-swap se necessário ---
+  if (flashLoanToken.toLowerCase() !== repayToken.toLowerCase()) {
+    let estimated: BigNumberish;
+    try {
+      estimated = await estimateSwapOutput(
+        flashLoanToken,
+        repayToken,
+        flashLoanAmount,
+        "uniswapv3"
+      );
+    } catch (err) {
+      throw new Error(`Falha na estimativa do pré-swap: ${(err as Error).message}`);
     }
-  });
 
-  // Create a liquidation call that conforms to CallData
+    const minOut = (BigInt(estimated) * BigInt(10_000 - slippageBps)) / BigInt(10_000);
+    repayAmount = estimated;
+
+    const tokenKey = `${flashLoanToken.toLowerCase()}-UNISWAP`;
+    if (!approveCache.has(tokenKey)) {
+      approveCache.add(tokenKey);
+      approveCalls.push({
+        to: flashLoanToken,
+        data: erc20Interface.encodeFunctionData("approve", [DEX_ROUTER.uniswapv3, flashLoanAmount]),
+        dex: "uniswapv3",
+        requiresApproval: true,
+        approvalToken: flashLoanToken,
+        approvalAmount: flashLoanAmount,
+        value: BigInt(0),
+      });
+    }
+
+    const preSwap = await buildSwapTransaction({
+      tokenIn: flashLoanToken,
+      tokenOut: repayToken,
+      amountIn: flashLoanAmount,
+      amountOutMin: minOut,
+      dex: "uniswapv3",
+    });
+
+    postSwapCalls.push(preSwap);
+  }
+
+  // --- Aprovação do repayToken para o liquidator ---
+  const tokenKey = `${repayToken.toLowerCase()}-LIQUIDATOR`;
+  if (!approveCache.has(tokenKey)) {
+    approveCache.add(tokenKey);
+    approveCalls.push({
+      to: repayToken,
+      data: erc20Interface.encodeFunctionData("approve", [liquidatorContract, repayAmount]),
+      protocol,
+      requiresApproval: true,
+      approvalToken: repayToken,
+      approvalAmount: repayAmount,
+      value: BigInt(0),
+    });
+  }
+
+  // --- Montagem da liquidate() ---
+  const liquidationInterface = new ethers.Interface([
+    "function liquidate(address borrower, address repayToken, uint256 repayAmount, address collateralToken)"
+  ]);
+
   const liquidationCall: CallData = {
-    to: liquidationCallRes.target,
-    data: liquidationCallRes.callData,
-    dex: defaultDex,
-    requiresApproval: true,
-    approvalToken: debtAsset,
-    approvalAmount: ethers.BigNumber.from(amountToRepay),
-    value: ethers.BigNumber.from(0)
-  };
-
-  // 2. Swap collateral received -> flashLoanToken
-  const swapCallData = await buildSwapTransaction[defaultDex]({
-    tokenIn: collateralAsset,
-    tokenOut: flashLoanToken,
-    amountIn: ethers.BigNumber.from(flashLoanAmount).div(2), // Use half as estimation
-    dex: defaultDex
-  }, dexRouterAddress);
-
-  // Create proper CallData format for swap
-  const swapCall: CallData = {
-    to: dexRouterAddress,
-    data: swapCallData.data,
-    dex: defaultDex,
-    value: ethers.BigNumber.from(0),
-    requiresApproval: true,
-    approvalToken: collateralAsset,
-    approvalAmount: ethers.BigNumber.from(flashLoanAmount).div(2)
-  };
-
-  // 3. Pay miner with profit token
-  const minerCallRaw = await encodePayMiner(
-    expectedProfitToken,
-    expectedProfitToken,
-    BigInt(minerReward)
-  );
-  
-  // Convert to proper CallData format
-  const minerCall: CallData = {
-    to: minerCallRaw.to || "",
-    data: String(minerCallRaw.data || ""), // Fix: Explicitly convert BytesLike to string
-    dex: defaultDex,
-    value: ethers.BigNumber.from(minerCallRaw.value?.toString() || "0"),
+    to: liquidatorContract,
+    data: liquidationInterface.encodeFunctionData("liquidate", [
+      borrower,
+      repayToken,
+      repayAmount,
+      collateralToken
+    ]),
+    protocol,
     requiresApproval: false,
     approvalToken: "",
-    approvalAmount: ethers.BigNumber.from(0)
+    approvalAmount: BigInt(0),
+    value: BigInt(0),
   };
 
-  // 4. Group into calls
-  const calls: CallData[] = [liquidationCall, swapCall, minerCall];
+  // --- Detecção do tipo de collateral ---
+  const collateralType = await detectCollateralType(collateralToken, provider);
+  let underlyingToken = collateralToken;
+  const estimatedCollateral = estimateCollateralReceived(repayAmount, liquidationBonusBps);
 
-  // 5. Build flashloan calldata
-  const orchestrateResult = await buildOrchestrateCall({
-    token: flashLoanToken,
-    amount: flashLoanAmount,
-    calls,
-  });
+  if (collateralType === "cToken") {
+    const cTokenInterface = new ethers.Interface([
+      "function redeem(uint256 redeemTokens) external returns (uint256)",
+      "function underlying() view returns (address)"
+    ]);
 
-  // Convert orchestrate result to CallData format
+    // Redeem
+    const redeemCall: CallData = {
+      to: collateralToken,
+      data: cTokenInterface.encodeFunctionData("redeem", [estimatedCollateral]),
+      protocol: "compound",
+      requiresApproval: false,
+      approvalToken: "",
+      approvalAmount: BigInt(0),
+      value: BigInt(0),
+    };
+
+    postSwapCalls.push(redeemCall);
+
+    try {
+      const data = cTokenInterface.encodeFunctionData("underlying");
+      const result = await provider.call({ to: collateralToken, data });
+      [underlyingToken] = cTokenInterface.decodeFunctionResult("underlying", result);
+    } catch {
+      throw new Error(`Falha ao obter underlying de cToken ${collateralToken}`);
+    }
+  } else if (collateralType === "aToken") {
+    const aTokenInterface = new ethers.Interface([
+      "function UNDERLYING_ASSET_ADDRESS() view returns (address)",
+      "function withdraw(address asset, uint256 amount, address to) external returns (uint256)"
+    ]);
+
+    try {
+      const data = aTokenInterface.encodeFunctionData("UNDERLYING_ASSET_ADDRESS");
+      const result = await provider.call({ to: collateralToken, data });
+      [underlyingToken] = aTokenInterface.decodeFunctionResult("UNDERLYING_ASSET_ADDRESS", result);
+    } catch {
+      throw new Error(`Falha ao obter underlying de aToken ${collateralToken}`);
+    }
+
+    // Withdraw
+    const withdrawCall: CallData = {
+      to: collateralToken,
+      data: aTokenInterface.encodeFunctionData("withdraw", [underlyingToken, estimatedCollateral, liquidatorContract]),
+      protocol: "aave",
+      requiresApproval: false,
+      approvalToken: "",
+      approvalAmount: BigInt(0),
+      value: BigInt(0),
+    };
+
+    postSwapCalls.push(withdrawCall);
+  }
+
+  // --- Pós-swap se necessário ---
+  if (underlyingToken.toLowerCase() !== flashLoanToken.toLowerCase()) {
+    let estimated: BigNumberish;
+
+    try {
+      estimated = await estimateSwapOutput(
+        underlyingToken,
+        flashLoanToken,
+        estimatedCollateral,
+        "uniswapv3"
+      );
+    } catch (err) {
+      throw new Error(`Falha na estimativa do pós-swap: ${(err as Error).message}`);
+    }
+
+    const minOut = (BigInt(estimated) * BigInt(10_000 - slippageBps)) / BigInt(10_000);
+
+    const tokenKey = `${underlyingToken.toLowerCase()}-UNISWAP`;
+    if (!approveCache.has(tokenKey)) {
+      approveCache.add(tokenKey);
+      approveCalls.push({
+        to: underlyingToken,
+        data: erc20Interface.encodeFunctionData("approve", [uniswapv3Router, estimatedCollateral]),
+        dex: "uniswapv3",
+        requiresApproval: true,
+        approvalToken: underlyingToken,
+        approvalAmount: estimatedCollateral,
+        value: BigInt(0),
+      });
+    }
+
+    const postSwap = await buildSwapTransaction({
+      tokenIn: underlyingToken,
+      tokenOut: flashLoanToken,
+      amountIn: estimatedCollateral,
+      amountOutMin: minOut,
+      dex: "uniswapv3",
+    });
+
+    postSwapCalls.push(postSwap);
+  }
+
   return {
-    to: orchestrateResult.to || "",
-    data: String(orchestrateResult.data || ""),
-    dex: defaultDex,
-    value: ethers.BigNumber.from("0"), // Fix: orchestrateResult.value doesn't exist, using default "0"
-    requiresApproval: false, // The orchestrate contract handles approvals internally
-    approvalToken: "",
-    approvalAmount: ethers.BigNumber.from(0)
+    approveCalls,
+    liquidationCall,
+    postSwapCalls,
   };
 }

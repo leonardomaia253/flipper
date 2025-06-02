@@ -1,139 +1,167 @@
-import { Call, BasicSwapStep, BuildOrchestrationParams } from "../../utils/types";
+import WebSocket from 'ws';
+// @ts-ignore
+global.WebSocket = WebSocket as any;
+
+import { Interface } from "ethers";
+import { ERC20_ABI } from "../../constants/abis";
+import { estimateSwapOutput } from "../../utils/estimateOutput";
 import { buildSwapTransaction } from "../../shared/build/buildSwap";
-import { buildApproveCall } from "../../shared/build/buildApproveCall";
-import { selectFlashloanToken } from "../../utils/flashloanamount";
-import { BigNumber } from "ethers";
+import { CallData, DexType } from "../../utils/types";
 import { DEX_ROUTER } from "../../constants/addresses";
+import { normalizeDex } from "../../utils/formallizedDEX";
+import { BigNumberish } from 'ethers';
+import { toBigInt } from 'ethers';
 
-export interface OrchestrationResult {
-  calls: Call[];
-  flashLoanAmount: BigNumber;
+const erc20Interface = new Interface(ERC20_ABI);
+
+type RouteStep = {
+  tokenIn: string;
+  tokenOut: string;
+  dex: DexType;
+  amountIn: BigNumberish;
+  amountOut: BigNumberish;
+};
+
+type BuildOrchestrationOptions = {
+  route: RouteStep[];
   flashLoanToken: string;
-}
+  flashLoanAmount: BigNumberish;
+  slippageBps?: number;
+};
 
-const SLIPPAGE_TOLERANCE = 0.005; // 0.5%, ajuste conforme desejar
-
-export async function buildOrchestrationFromRoute({
+export async function buildDynamicOrchestration({
   route,
-  executor,
-  useAltToken,
-  altToken,
-}: BuildOrchestrationParams): Promise<OrchestrationResult | undefined> {
-  if (!route || route.length === 0) {
-    throw new Error("Rota inválida ou não encontrada");
+  flashLoanToken,
+  flashLoanAmount,
+  slippageBps = 30,
+}: BuildOrchestrationOptions): Promise<{
+  approveCalls: CallData[];
+  swapCalls: CallData[];
+}> {
+  if (route.length === 0) {
+    throw new Error("No route steps provided");
   }
 
-  const calls: Call[] = [];
+  const approveCache = new Set<string>();
+  const approveCalls: CallData[] = [];
+  const swapCalls: CallData[] = [];
 
   const firstStep = route[0];
-  const lastStep = route[route.length - 1];
+  const firstDexRouter = DEX_ROUTER[normalizeDex(firstStep.dex)];
+  if (!firstDexRouter) throw new Error(`Dex router not found for ${firstStep.dex}`);
 
-  // Extrai os nomes das DEX para pré e pós swap (você pode ajustar conforme sua lógica)
-  const preSwapDex = "uniswapv3"; // ex: pode ser parâmetro no futuro
-  const postSwapDex = "uniswapv3";
+  // --- Pré-swap se necessário ---
+  if (flashLoanToken.toLowerCase() !== firstStep.tokenIn.toLowerCase()) {
+    const estimated = await estimateSwapOutput(
+      flashLoanToken,
+      firstStep.tokenIn,
+      flashLoanAmount,
+      firstStep.dex
+    );
 
-  // Pega o router correto para as DEXs (do mapa)
-  const preSwapSpender = DEX_ROUTER[preSwapDex];
-  if (useAltToken && !preSwapSpender) {
-    throw new Error(`Router do pré-swap não encontrado para a DEX: ${preSwapDex}`);
-  }
+    const estimatedBigInt = BigInt(estimated);
+    const minOut = (estimatedBigInt * BigInt(10_000 - slippageBps)) / BigInt(10_000);
 
-  const postSwapSpender = DEX_ROUTER[postSwapDex];
-  if (useAltToken && !postSwapSpender) {
-    throw new Error(`Router do pós-swap não encontrado para a DEX: ${postSwapDex}`);
-  }
+    const tokenKey = `${flashLoanToken.toLowerCase()}-${firstStep.dex.toLowerCase()}`;
+    if (!approveCache.has(tokenKey)) {
+      approveCache.add(tokenKey);
+      approveCalls.push({
+        to: flashLoanToken,
+        data: erc20Interface.encodeFunctionData("approve", [firstDexRouter, flashLoanAmount]),
+        dex: firstStep.dex,
+        requiresApproval: true,
+        approvalToken: flashLoanToken,
+        approvalAmount: flashLoanAmount,
+        value: 0n,
+      });
+    }
 
-  // ----------------------------------------
-  // 🔁 Flashloan setup
-  // ----------------------------------------
-  const flashloanData = await selectFlashloanToken({
-    dex: preSwapDex,
-    tokenIn: firstStep.tokenIn,
-    amountIn: firstStep.amountIn,
-  });
-
-  if (!flashloanData) return;
-
-  const { flashLoanToken, flashLoanAmount } = flashloanData;
-
-  // ----------------------------------------
-  // 🔁 Pré-swap com token alternativo (opcional)
-  // ----------------------------------------
-  if (useAltToken) {
-    // Aprovação do token do flashloan para o router do pré-swap
-    calls.push(buildApproveCall(flashLoanToken, preSwapSpender, flashLoanAmount.toString()));
-
-    // Construção do pré-swap para converter flashLoanToken → primeiro token da rota
-    const preSwapStep: BasicSwapStep = {
-      dex: preSwapDex,
+    const preSwap = await buildSwapTransaction({
       tokenIn: flashLoanToken,
       tokenOut: firstStep.tokenIn,
       amountIn: flashLoanAmount,
-      // Aqui o mínimo que aceitamos é o amountIn do primeiro passo (sem slippage)
-      amountOutMin: firstStep.amountIn,
-      recipient: executor,
-    };
-    const preSwapCall = await buildSwapTransaction(preSwapStep);
-    calls.push(preSwapCall);
-  } else {
-    // Aprovação direta do primeiro tokenIn da rota para o spender da pool
-    const spender =
-      typeof firstStep.poolData === "string"
-        ? firstStep.poolData
-        : firstStep.poolData?.router;
+      amountOutMin: minOut,
+      dex: firstStep.dex,
+    });
 
-    if (!spender) {
-      throw new Error("Spender (router) não definido no primeiro passo");
+    swapCalls.push(preSwap);
+  }
+
+  // --- Swaps principais ---
+  for (const step of route) {
+    const dexRouter = DEX_ROUTER[normalizeDex(step.dex)];
+    if (!dexRouter) throw new Error(`Dex router not found for ${step.dex}`);
+
+    const minOut = (toBigInt(step.amountOut) * BigInt(10_000 - slippageBps)) / BigInt(10_000);
+
+    const tokenKey = `${step.tokenIn.toLowerCase()}-${step.dex.toLowerCase()}`;
+    if (!approveCache.has(tokenKey)) {
+      approveCache.add(tokenKey);
+      approveCalls.push({
+        to: step.tokenIn,
+        data: erc20Interface.encodeFunctionData("approve", [dexRouter, step.amountIn]),
+        dex: step.dex,
+        requiresApproval: true,
+        approvalToken: step.tokenIn,
+        approvalAmount: step.amountIn,
+        value: 0n,
+      });
     }
 
-    calls.push(
-      buildApproveCall(
-        firstStep.tokenIn,
-        spender,
-        (firstStep.amountIn ?? BigNumber.from(0)).toString()
-      )
-    );
+    const swapTx = await buildSwapTransaction({
+      tokenIn: step.tokenIn,
+      tokenOut: step.tokenOut,
+      amountIn: step.amountIn,
+      amountOutMin: minOut,
+      dex: step.dex,
+    });
+
+    swapCalls.push(swapTx);
   }
 
-  // ----------------------------------------
-  // 🔁 Execução da rota principal (swaps principais)
-  // ----------------------------------------
-  for (const step of route) {
-    const swapCall = await buildSwapTransaction({  ...step, recipient: executor, amountOutMin: step.amountOutMin ?? BigNumber.from(0),});
-    calls.push(swapCall);
-  }
+  // --- Pós-swap se necessário ---
+  const lastStep = route[route.length - 1];
+  const lastDexRouter = DEX_ROUTER[normalizeDex(lastStep.dex)];
+  if (!lastDexRouter) throw new Error(`Dex router not found for ${lastStep.dex}`);
 
-  // ----------------------------------------
-  // 🔁 Pós-swap com token alternativo (opcional)
-  // ----------------------------------------
-  if (useAltToken) {
-    const postSwapAmountIn = lastStep.amountOut;
-    if (!postSwapAmountIn) throw new Error("amountOut não definido para o último passo");
-
-    // Aprovação para o router do pós-swap usar o token do último passo
-    calls.push(
-      buildApproveCall(lastStep.tokenOut, postSwapSpender, postSwapAmountIn.toString())
+  if (flashLoanToken.toLowerCase() !== lastStep.tokenOut.toLowerCase()) {
+    const estimated = await estimateSwapOutput(
+      lastStep.tokenOut,
+      flashLoanToken,
+      lastStep.amountOut,
+      lastStep.dex
     );
 
-    // Construção do pós-swap para converter tokenOut final → flashLoanToken
-    const postSwapStep: BasicSwapStep = {
-      dex: postSwapDex,
+    const estimatedBigInt = BigInt(estimated);
+    const minOut = (estimatedBigInt * BigInt(10_000 - slippageBps)) / BigInt(10_000);
+
+    const tokenKey = `${lastStep.tokenOut.toLowerCase()}-${lastStep.dex.toLowerCase()}`;
+    if (!approveCache.has(tokenKey)) {
+      approveCache.add(tokenKey);
+      approveCalls.push({
+        to: lastStep.tokenOut,
+        data: erc20Interface.encodeFunctionData("approve", [lastDexRouter, lastStep.amountOut]),
+        dex: lastStep.dex,
+        requiresApproval: true,
+        approvalToken: lastStep.tokenOut,
+        approvalAmount: lastStep.amountOut,
+        value: 0n,
+      });
+    }
+
+    const postSwap = await buildSwapTransaction({
       tokenIn: lastStep.tokenOut,
       tokenOut: flashLoanToken,
-      amountIn: postSwapAmountIn,
-      amountOutMin: flashLoanAmount.mul(1.01),
-      recipient: executor,
-    };
-    const postSwapCall = await buildSwapTransaction(postSwapStep);
-    calls.push(postSwapCall);
+      amountIn: lastStep.amountOut,
+      amountOutMin: minOut,
+      dex: lastStep.dex,
+    });
+
+    swapCalls.push(postSwap);
   }
 
-  // ----------------------------------------
-  // ✅ Retorna resultado final da orquestração
-  // ----------------------------------------
   return {
-    calls,
-    flashLoanAmount,
-    flashLoanToken,
+    approveCalls,
+    swapCalls,
   };
 }

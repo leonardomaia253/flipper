@@ -1,4 +1,3 @@
-
 import { ethers } from "ethers";
 import { BuiltRoute, SimulationResult } from "../utils/types";
 import { enhancedLogger } from "../utils/enhancedLogger";
@@ -10,29 +9,28 @@ import { TENDERLY_CONFIG } from "../constants/config";
  */
 export async function simulateAndValidateRoute(
   route: BuiltRoute,
-  userAddress: string
+  useraddress: string
 ): Promise<SimulationResult> {
   try {
     enhancedLogger.info(`Simulating route with ${route.swaps.length} swaps`, {
       botType: "arbitrage",
       metadata: { 
         tokenIn: route.swaps[0]?.tokenIn || "unknown",
-        tokenOut: route.swaps[route.swaps.length-1]?.tokenOut || "unknown",
+        tokenOut: route.swaps[route.swaps.length - 1]?.tokenOut || "unknown",
       }
     });
 
     // Prepare the simulation payload for Tenderly API
     const simulationPayload = {
-      network_id: "42161", // Arbitrum One
-      from: userAddress,
-      to: route.swaps[0]?.target || ethers.constants.AddressZero, 
-      input: route.swaps[0]?.callData || "0x", 
-      gas: 10000000, // Gas limit, can be adjusted
-      gas_price: "0", // Use average gas price
+      network_id: "8453", // Base One
+      from: useraddress,
+      to: route.swaps[0]?.target || ethers.ZeroAddress,
+      input: route.swaps[0]?.callData || "0x",
+      gas: 10_000_000, // Gas limit, can be adjusted
       value: "0", // ETH value to send
       save: true, // Save simulation for later reference
       save_if_fails: true, // Save even if simulation fails
-      simulation_type: "full", // Full simulation to get accurate results
+      simulation_type: "full" // Full simulation to get accurate results
     };
 
     // Call Tenderly API for simulation
@@ -55,48 +53,48 @@ export async function simulateAndValidateRoute(
 
     // Extract token transfers from the simulation
     const tokenTransfers = simulationResult.transaction?.transaction_info?.token_transfers || [];
-    
+
     // Calculate profit based on token transfers
-    // We look for transfers to/from the user address
-    let totalIn = ethers.BigNumber.from(0);
-    let totalOut = ethers.BigNumber.from(0);
-    
+    let totalIn = 0n;
+    let totalOut = 0n;
+
     tokenTransfers.forEach((transfer: any) => {
-      if (transfer.to.toLowerCase() === userAddress.toLowerCase()) {
-        totalIn = totalIn.add(transfer.value);
-      } else if (transfer.from.toLowerCase() === userAddress.toLowerCase()) {
-        totalOut = totalOut.add(transfer.value);
+      const value = ethers.toBigInt(transfer.value);
+      if (transfer.to.toLowerCase() === useraddress.toLowerCase()) {
+        totalIn += value;
+      } else if (transfer.from.toLowerCase() === useraddress.toLowerCase()) {
+        totalOut += value;
       }
     });
-    
+
     // Calculate profit
-    const profits = totalIn.sub(totalOut);
-    
+    const profits = totalIn - totalOut;
+
     // Generate simulation URL
     const simulationUrl = `https://dashboard.tenderly.co/simulator/${simulationResult.id}`;
 
     // Log result
-    if (profits.gt(0)) {
-      enhancedLogger.info(`Simulation successful with projected profit: ${ethers.utils.formatEther(profits)} ETH`, {
+    if (profits > 0n) {
+      enhancedLogger.info(`Simulation successful with projected profit: ${ethers.formatEther(profits)} ETH`, {
         botType: "arbitrage",
         metadata: { 
           simulationUrl,
-          profits: ethers.utils.formatEther(profits)
+          profits: ethers.formatEther(profits)
         }
       });
     } else {
-      enhancedLogger.warn(`Simulation completed but no profit detected: ${ethers.utils.formatEther(profits)} ETH`, {
+      enhancedLogger.warn(`Simulation completed but no profit detected: ${ethers.formatEther(profits)} ETH`, {
         botType: "arbitrage",
         metadata: { 
           simulationUrl,
-          profits: ethers.utils.formatEther(profits)
+          profits: ethers.formatEther(profits)
         }
       });
     }
-    
+
     return {
       success: simulationResult.status === true,
-      ok: simulationResult.status === true && profits.gt(0),
+      ok: simulationResult.status === true && profits > 0n,
       profits,
       simulationUrl
     };
@@ -105,11 +103,11 @@ export async function simulateAndValidateRoute(
       botType: "arbitrage",
       data: error
     });
-    
+
     return {
       success: false,
       ok: false,
-      profits: ethers.BigNumber.from(0),
+      profits: 0n,
       simulationUrl: "",
       error: error instanceof Error ? error.message : String(error)
     };

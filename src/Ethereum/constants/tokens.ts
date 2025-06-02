@@ -1,5 +1,5 @@
 
-// Token addresses for the Arbitrum network
+// Token addresses for the Ethererum network
 export const WETH = "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1";
 export const USDC = "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8";
 export const USDT = "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9";
@@ -44,7 +44,7 @@ export const TOKEN_DETAILS = {
   [ARB]: {
     symbol: "ARB",
     decimals: 18,
-    name: "Arbitrum",
+    name: "Ethererum",
     logoURI: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/arbitrum/assets/0x912CE59144191C1204E64559FE8253a0e49E6548/logo.png"
   },
   [GMX]: {
@@ -87,12 +87,12 @@ export const COMMON_PAIRS = [
 
 // Helper function to get token details
 export function getTokenDetails(address: string) {
-  const lowerCaseAddress = address.toLowerCase();
+  const lowerCaseaddress = address.toLowerCase();
   // Find matching token by case-insensitive address
-  for (const [tokenAddress, details] of Object.entries(TOKEN_DETAILS)) {
-    if (tokenAddress.toLowerCase() === lowerCaseAddress) {
+  for (const [tokenaddress, details] of Object.entries(TOKEN_DETAILS)) {
+    if (tokenaddress.toLowerCase() === lowerCaseaddress) {
       return {
-        address: tokenAddress,
+        address: tokenaddress,
         ...details
       };
     }

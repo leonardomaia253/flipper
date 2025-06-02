@@ -1,80 +1,96 @@
 import axios from 'axios';
+import fs from 'fs/promises';
+import path from 'path';
+import { DexPair } from './types';
+import { BigNumberish } from 'ethers';
 
-export interface TokenInfo {
-  address: string;
-  symbol: string;
-  decimals: number;
-}
+const OUTPUT_FILE = path.join(__dirname, 'arbitrum_dex_pairs.json');
+const CACHE_DURATION_MS = 86_400_000; // 24 horas
 
-interface LlamaToken {
-  address: string;
-  symbol: string;
-  decimals: number;
-  volume24hUSD?: number;
-}
-
-let cache: {
-  timestamp: number;
-  data: TokenInfo[];
-} | null = null;
-
-const CACHE_DURATION_MS = 60_000; // 1 minuto
-const MAX_RETRIES = 3;
-const LLAMA_API_URL = 'https://api.llama.fi/token/arbitrum';
-
-// 🔁 Retry com backoff simples
-async function fetchWithRetries(url: string, retries = MAX_RETRIES): Promise<LlamaToken[]> {
-  for (let attempt = 0; attempt < retries; attempt++) {
-    try {
-      const res = await axios.get<{ tokens: LlamaToken[] }>(url);
-      return res.data.tokens;
-    } catch (err) {
-      const wait = 1000 * (attempt + 1); // Espera crescente: 1s, 2s, 3s
-      console.warn(`⚠️ Erro na tentativa ${attempt + 1}, tentando novamente em ${wait}ms...`);
-      await new Promise((res) => setTimeout(res, wait));
-    }
-  }
-  throw new Error('❌ Falha ao buscar dados da API da DeFi Llama após várias tentativas.');
-}
-
-// 🛟 Fallback de tokens mais comuns na Arbitrum
-const fallbackTokens: TokenInfo[] = [
-  { address: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1', symbol: 'WETH', decimals: 18 },
-  { address: '0xff970a61a04b1ca14834a43f5de4533ebddb5cc8', symbol: 'USDC', decimals: 6 },
-  { address: '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9', symbol: 'USDT', decimals: 6 },
-  { address: '0x2f2a2543b76a4166549f7aaab1e4cdd31fA95eF3', symbol: 'WBTC', decimals: 8 },
-  { address: '0x912CE59144191C1204E64559FE8253a0e49E6548', symbol: 'ARB', decimals: 18 },
+const ALLOWED_DEXES = [
+  'uniswap-v2',
+  'uniswap-v3',
+  'sushiswap-v2',
+  'sushiswap-v3',
+  'pancakeswap-v3',
+  'camelot',
+  'ramses-v2',
 ];
 
-export async function fetchTopTokensArbitrum(limit: number = 200): Promise<TokenInfo[]> {
-  const now = Date.now();
+interface CacheMeta {
+  timestamp: number;
+  data: DexPair[];
+}
 
-  // ✅ Cache em memória (válido por 1 minuto)
-  if (cache && now - cache.timestamp < CACHE_DURATION_MS) {
+let cache: CacheMeta | null = null;
+
+async function loadCache(): Promise<void> {
+  try {
+    const content = await fs.readFile(OUTPUT_FILE, 'utf-8');
+    const parsed: CacheMeta = JSON.parse(content);
+    if (Date.now() - parsed.timestamp < CACHE_DURATION_MS) {
+      cache = parsed;
+      console.log('✅ Cache carregado e válido.');
+    } else {
+      console.log('ℹ️ Cache expirado, será atualizado.');
+    }
+  } catch {
+    console.log('ℹ️ Nenhum cache encontrado, será criado.');
+  }
+}
+
+async function saveCache(data: DexPair[]): Promise<void> {
+  const meta: CacheMeta = {
+    timestamp: Date.now(),
+    data
+  };
+  await fs.writeFile(OUTPUT_FILE, JSON.stringify(meta, null, 2));
+  console.log(`✅ ${data.length} pares salvos em cache: ${OUTPUT_FILE}`);
+}
+
+export async function fetchDexScreenerPairsArbitrum(limit = 500): Promise<DexPair[]> {
+  await loadCache();
+  if (cache) {
+    console.log('✅ Usando cache de pares.');
     return cache.data.slice(0, limit);
   }
 
   try {
-    const tokens = await fetchWithRetries(LLAMA_API_URL);
+    const url = 'https://api.dexscreener.com/latest/dex/pairs/arbitrum';
+    const response = await axios.get<{ pairs: any[] }>(url);
 
-    const sorted = tokens
-      .filter(t => t.address && t.symbol && t.decimals != null && t.volume24hUSD != null)
-      .sort((a, b) => b.volume24hUSD! - a.volume24hUSD!)
-      .slice(0, limit);
+    const filteredPairs: DexPair[] = response.data.pairs
+      .filter(p => ALLOWED_DEXES.includes(p.dexId))
+      .slice(0, limit)
+      .map(p => ({
+        pairaddress: p.pairaddress,
+        dex: p.dexId,
+        url: p.url,
+        tokenIn: {
+          address: p.baseToken.address,
+          symbol: p.baseToken.symbol,
+          decimals:p.baseToken.decimals
+        },
+        tokenOut: {
+          address: p.quoteToken.address,
+          symbol: p.quoteToken.symbol,
+          decimals: p.quoteToken.decimals,
+        },
+        liquidity: {
+          usd: Number(p.liquidity?.usd) || 0,
+        },
+        volume24h: {
+          usd: Number(p.volume?.h24) || 0,
+        },
+        priceNative: p.priceNative,
+        priceUsd: p.priceUsd,
+      }));
 
-    const result: TokenInfo[] = sorted.map(({ address, symbol, decimals }) => ({
-      address,
-      symbol,
-      decimals,
-    }));
+    await saveCache(filteredPairs);
 
-    cache = { timestamp: now, data: result };
-    return result;
+    return filteredPairs;
   } catch (err) {
-    console.error(err instanceof Error ? err.message : err);
-
-    console.warn("⚠️ Usando fallback local com tokens mais comuns da Arbitrum.");
-    return fallbackTokens.slice(0, limit);
+    console.error('❌ Erro ao buscar ou processar pares:', err);
+    return [];
   }
 }
-

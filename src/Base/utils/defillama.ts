@@ -9,10 +9,10 @@ export async function getArbitrumTokens(): Promise<TokenInfo[]> {
     const arbitrumTokens: TokenInfo[] = [];
 
     for (const protocol of protocols) {
-      if (protocol.chains.includes('Arbitrum')) {
+      if (protocol.chains.includes('Base')) {
         // Supondo que cada protocolo tenha uma lista de tokens com informações detalhadas
         for (const token of protocol.tokens || []) {
-          if (token.chain === 'Arbitrum') {
+          if (token.chain === 'Base') {
             arbitrumTokens.push({
               address: token.address,
               symbol: token.symbol,

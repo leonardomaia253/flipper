@@ -1,6 +1,6 @@
 
 import { enhancedLogger, createContextLogger } from './enhancedLogger';
-import { createClient } from '@supabase/supabase-js';
+
 
 // Types for our structured logging system
 export interface ModuleStatus {
@@ -127,7 +127,7 @@ export function createBotModuleLogger(options: {
       return logEntry;
     },
     
-    // Log scan progress or activity
+    // Log scan proggetAddress or activity
     logScan: async (message: string, details: any) => {
       moduleStatus!.lastChecked = new Date();
       

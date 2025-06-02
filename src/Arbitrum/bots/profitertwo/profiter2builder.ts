@@ -1,25 +1,30 @@
-import { BigNumber, ethers } from "ethers";
+import WebSocket from 'ws';
+// @ts-ignore
+global.WebSocket = WebSocket as any;
+
+import { Interface } from "ethers";
 import { ERC20_ABI } from "../../constants/abis";
 import { estimateSwapOutput } from "../../utils/estimateOutput";
 import { buildSwapTransaction } from "../../shared/build/buildSwap";
 import { CallData, DexType } from "../../utils/types";
 import { DEX_ROUTER } from "../../constants/addresses";
 import { normalizeDex } from "../../utils/formallizedDEX";
+import { BigNumberish } from 'ethers';
 
-const erc20Interface = new ethers.utils.Interface(ERC20_ABI);
+const erc20Interface = new Interface(ERC20_ABI);
 
 type RouteStep = {
   tokenIn: string;
   tokenOut: string;
   dex: DexType;
-  amountIn: BigNumber;
-  amountOut: BigNumber;
+  amountIn: BigNumberish;
+  amountOut: BigNumberish;
 };
 
 type BuildOrchestrationOptions = {
   route: RouteStep[];
   flashLoanToken: string;
-  flashLoanAmount: BigNumber;
+  flashLoanAmount: BigNumberish;
   slippageBps?: number;
 };
 
@@ -53,7 +58,8 @@ export async function buildDynamicOrchestration({
       firstStep.dex
     );
 
-    const minOut = estimated.mul(10_000 - slippageBps).div(10_000);
+    const estimatedBigInt = BigInt(estimated);
+    const minOut = (estimatedBigInt * BigInt(10_000 - slippageBps)) / BigInt(10_000);
 
     const tokenKey = `${flashLoanToken.toLowerCase()}-${firstStep.dex.toLowerCase()}`;
     if (!approveCache.has(tokenKey)) {
@@ -65,7 +71,7 @@ export async function buildDynamicOrchestration({
         requiresApproval: true,
         approvalToken: flashLoanToken,
         approvalAmount: flashLoanAmount,
-        value: BigNumber.from(0),
+        value: 0n,
       });
     }
 
@@ -85,7 +91,7 @@ export async function buildDynamicOrchestration({
     const dexRouter = DEX_ROUTER[normalizeDex(step.dex)];
     if (!dexRouter) throw new Error(`Dex router not found for ${step.dex}`);
 
-    const minOut = step.amountOut.mul(10_000 - slippageBps).div(10_000);
+    const minOut = (BigInt(step.amountOut) * BigInt(10_000 - slippageBps)) / BigInt(10_000);
 
     const tokenKey = `${step.tokenIn.toLowerCase()}-${step.dex.toLowerCase()}`;
     if (!approveCache.has(tokenKey)) {
@@ -97,7 +103,7 @@ export async function buildDynamicOrchestration({
         requiresApproval: true,
         approvalToken: step.tokenIn,
         approvalAmount: step.amountIn,
-        value: BigNumber.from(0),
+        value: 0n,
       });
     }
 
@@ -125,7 +131,8 @@ export async function buildDynamicOrchestration({
       lastStep.dex
     );
 
-    const minOut = estimated.mul(10_000 - slippageBps).div(10_000);
+    const estimatedBigInt = BigInt(estimated);
+    const minOut = (estimatedBigInt * BigInt(10_000 - slippageBps)) / BigInt(10_000);
 
     const tokenKey = `${lastStep.tokenOut.toLowerCase()}-${lastStep.dex.toLowerCase()}`;
     if (!approveCache.has(tokenKey)) {
@@ -137,7 +144,7 @@ export async function buildDynamicOrchestration({
         requiresApproval: true,
         approvalToken: lastStep.tokenOut,
         approvalAmount: lastStep.amountOut,
-        value: BigNumber.from(0),
+        value: 0n,
       });
     }
 

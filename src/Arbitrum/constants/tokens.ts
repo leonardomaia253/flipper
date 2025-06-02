@@ -87,12 +87,12 @@ export const COMMON_PAIRS = [
 
 // Helper function to get token details
 export function getTokenDetails(address: string) {
-  const lowerCaseAddress = address.toLowerCase();
+  const lowerCaseaddress = address.toLowerCase();
   // Find matching token by case-insensitive address
-  for (const [tokenAddress, details] of Object.entries(TOKEN_DETAILS)) {
-    if (tokenAddress.toLowerCase() === lowerCaseAddress) {
+  for (const [tokenaddress, details] of Object.entries(TOKEN_DETAILS)) {
+    if (tokenaddress.toLowerCase() === lowerCaseaddress) {
       return {
-        address: tokenAddress,
+        address: tokenaddress,
         ...details
       };
     }

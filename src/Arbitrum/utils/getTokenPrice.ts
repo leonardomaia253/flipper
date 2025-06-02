@@ -2,13 +2,14 @@ import { ethers } from "ethers";
 import axios from "axios";
 import { LRUCache } from "lru-cache";
 import { WETH } from "../constants/addresses";
+import { BigNumberish } from "ethers";
 
 // === Constantes ===
-const WETH_ADDRESS = WETH
+const WETH_ADDRESS = WETH;
 const TIMEOUT = 3000;
 
 // === ERC20 Interface ===
-const erc20Interface = new ethers.utils.Interface([
+const erc20Interface = new ethers.Interface([
   "function decimals() view returns (uint8)",
   "function symbol() view returns (string)",
 ]);
@@ -28,7 +29,7 @@ function normalizeAddress(address: string): string {
   return address.toLowerCase();
 }
 
-async function getDecimals(tokenAddress: string, provider: ethers.providers.Provider): Promise<number> {
+async function getDecimals(tokenAddress: string, provider: ethers.JsonRpcProvider): Promise<number> {
   const normalized = normalizeAddress(tokenAddress);
   const cached = decimalsCache.get(normalized);
   if (cached !== undefined) return cached;
@@ -39,8 +40,7 @@ async function getDecimals(tokenAddress: string, provider: ethers.providers.Prov
     decimalsCache.set(normalized, decimals);
     return decimals;
   } catch (error) {
-      console.warn(`Fallback to 18 decimals for ${normalized}:`, (error as Error)?.message ?? error);
-
+    console.warn(`Fallback to 18 decimals for ${normalized}:`, (error as Error)?.message ?? error);
     decimalsCache.set(normalized, 18);
     return 18;
   }
@@ -53,36 +53,34 @@ async function fetchFromCoinGecko(address: string): Promise<number | null> {
     const { data } = await axios.get(url, { timeout: TIMEOUT });
     return data?.[address]?.eth ?? null;
   } catch (error) {
-    console.warn(`Coingecko error for ${address}:`, (error as Error)?.message ?? error)
+    console.warn(`Coingecko error for ${address}:`, (error as Error)?.message ?? error);
     return null;
   }
 }
 
-async function fetchFrom1inch(
-  tokenAddress: string,
-  provider: ethers.providers.Provider
-): Promise<number | null> {
+async function fetchFrom1inch(tokenAddress: string, provider: ethers.JsonRpcProvider): Promise<number | null> {
   try {
-    const amount = "1000000000000000000"; // 1 token (in 1e18)
-    const url = `https://api.1inch.io/v5.0/42161/quote?fromTokenAddress=${tokenAddress}&toTokenAddress=${WETH_ADDRESS}&amount=${amount}`;
+    const amount = ethers.parseUnits("1", 18); // 1 token in wei (assume 18 decimals)
+    const url = `https://api.1inch.io/v5.0/42161/quote?fromTokenAddress=${tokenAddress}&toTokenAddress=${WETH_ADDRESS}&amount=${amount.toString()}`;
     const { data } = await axios.get(url, { timeout: TIMEOUT });
 
     if (!data.toTokenAmount) return null;
 
     const decimals = await getDecimals(tokenAddress, provider);
-    const toTokenAmount = ethers.utils.formatEther(data.toTokenAmount);
-    const baseAmount = ethers.utils.formatUnits(amount, decimals);
-    return parseFloat(toTokenAmount) / parseFloat(baseAmount);
+    const toTokenAmount = ethers.parseUnits(data.toTokenAmount, 0); // 1inch returns amount in string of smallest unit
+    // Mas toTokenAmount pode ser muito grande, preferimos usar ethers.formatUnits para converter
+    const toTokenAmountNum = parseFloat(ethers.formatUnits(data.toTokenAmount, 18)); // Para WETH 18 decimais
+    const baseAmountNum = parseFloat(ethers.formatUnits(amount, decimals));
+    return toTokenAmountNum / baseAmountNum;
   } catch (error) {
-    console.warn(`Fallback to 18 decimals for ${tokenAddress}:`, (error as Error)?.message ?? error);
-
+    console.warn(`1inch fetch error for ${tokenAddress}:`, (error as Error)?.message ?? error);
     return null;
   }
 }
 
 async function fetchFromSushiSwap(address: string): Promise<number | null> {
   try {
-    const query = `{ token(id: "${address}") { derivedETH } }`;
+    const query = `{ token(id: "${address.toLowerCase()}") { derivedETH } }`;
     const { data } = await axios.post(
       "https://api.thegraph.com/subgraphs/name/sushiswap/arbitrum-exchange",
       { query },
@@ -91,7 +89,6 @@ async function fetchFromSushiSwap(address: string): Promise<number | null> {
     return parseFloat(data?.data?.token?.derivedETH ?? "0") || null;
   } catch (error) {
     console.warn(`SushiSwap error for ${address}:`, (error as Error)?.message ?? error);
-
     return null;
   }
 }
@@ -99,7 +96,7 @@ async function fetchFromSushiSwap(address: string): Promise<number | null> {
 // === Função principal ===
 export async function getTokenPrice(
   tokenAddress: string,
-  provider: ethers.providers.Provider
+  provider: ethers.JsonRpcProvider
 ): Promise<number> {
   const address = normalizeAddress(tokenAddress);
 
@@ -134,23 +131,28 @@ export async function getTokenPrice(
 export async function getTokenValueInETH(
   tokenAddress: string,
   amount: ethers.BigNumberish,
-  provider: ethers.providers.Provider
-): Promise<ethers.BigNumber> {
+  provider: ethers.JsonRpcProvider
+): Promise<BigNumberish> {
   try {
     const decimals = await getDecimals(tokenAddress, provider);
     const price = await getTokenPrice(tokenAddress, provider);
-    const amountInEth = parseFloat(ethers.utils.formatUnits(amount, decimals)) * price;
-    return ethers.utils.parseEther(amountInEth.toString());
+
+    // Converte amount para número decimal
+    const amountDecimal = parseFloat(ethers.formatUnits(amount, decimals));
+    const amountInEth = amountDecimal * price;
+
+    // Converte para BigInt (18 decimais)
+    const amountInEthBigInt = ethers.parseUnits(amountInEth.toString(), 18);
+    return amountInEthBigInt;
   } catch (error) {
     console.warn(`Error in getTokenValueInETH for ${tokenAddress}:`, (error as Error)?.message ?? error);
-
-    return ethers.constants.Zero;
+    return 0n;
   }
 }
 
 export async function getTokenPriceInETH(
   tokenAddress: string,
-  provider: ethers.providers.Provider
+  provider: ethers.JsonRpcProvider
 ): Promise<number> {
   return getTokenPrice(tokenAddress, provider);
 }

@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { CallData } from "../../utils/types";
+import { executoraddress } from "../../constants/addresses";
 
 // Constrói uma call para flashloan que executa uma sequência de operações
 export async function buildOrchestrateCall({
@@ -14,23 +15,22 @@ export async function buildOrchestrateCall({
   data: string;
   to: string;
 }> {
-  const executorAddress = "0xebc996030ad65e113ba2f03e55de080044b83dca";
   
-  const iface = new ethers.utils.Interface([
+  const iface = new ethers.Interface([
     "function orchestrate((address provider, address token, uint256 amount)[],(address target, bytes data, bool requiresApproval, address approvalToken, uint256 approvalAmount)[])"
   ]);
 
   // Definindo o flashloan (exemplo com Aave como provider)
   const flashloan = [{
-    provider: "0xC4dCB5126a3AfEd129BC3668Ea19285A9f56D15D", // Endereço real do provider, ex: Aave pool
-    token: token,
+    provider: ethers.getAddress("0x6807dc923806fE8Fd134338EABCA509979a7e0cB"),// Endereço real do provider, ex: Aave pool
+    token,
     amount: amount
   }];
 
   const data = iface.encodeFunctionData("orchestrate", [flashloan, calls]);
 
   return {
-    to: executorAddress,
+    to: executoraddress,
     data: data,
   };
 }

@@ -1,0 +1,55 @@
+Guia de utilização
+
+
+
+1-uniswapv2
+
+função para saber se o par existe usando contrato de factory - getpair
+função para saber se existe liquidez para o par
+função convencional da uniswapv2 para cotações - getamountsout
+função convencional da uniswapv2 para swaps
+
+
+
+2-uniswaapv3
+3-uniswapv4
+4-sushiswapv2
+
+função para saber se o par existe usando contrato de factory - getpair
+função para saber se existe liquidez para o par
+função convencional da uniswapv2 para cotações - getamountsout
+função convencional da uniswapv2 para swaps
+
+5-sushiswapv3
+6-pancakeswapv3
+7-ramsesv2
+
+Factory contract: 0xAA2cd7477c451E703f3B9Ba5663334914763edF8
+Router address: 0xAA23611badAFB62D37E7295A682D21960ac85A90
+Quoter V2: 0xAA20EFF7ad2F523590dE6c04918DaAE0904E3b20
+
+ExactInpuSingle para swaps
+QuoteExactSingleInput para fazer cotação
+
+
+
+8-maverickv2
+
+MaverickV2Quoter 0xb40AfdB85a07f37aE217E7D6462e609900dD8D7A
+MaverickV2Router 0x5c3b380e5Aeec389d1014Da3Eb372FA2C9e0fc76
+MaverickV2Position 0x116193c58B40D50687c0433B2aa0cC4AE00bC32c
+MaverickV2Factory 0x0A7e848Aca42d879EF06507Fca0E7b33A0a63c1e
+
+ExactInpuSingle para swaps
+QuoteExactSingleInput para fazer cotação
+
+
+9-curve
+
+get_dy para cotações 
+exchange para swaps
+
+10-camelot
+
+
+ExactInpuSingle para swaps

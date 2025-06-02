@@ -15,65 +15,59 @@ export const ERC20_ABI = [
   "event Approval(address indexed owner, address indexed spender, uint256 value)"
 ];
 
-//---------------------------EXECUTOR-----------------------------//
-
-export const EXECUTOR_ABI = [
-  "function executeSwap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut, bytes callData) payable returns (uint256)",
-  "function executeArbitrage(address[] path, uint256 amountIn, uint256 minAmountOut) payable returns (uint256)",
-  "function executeFrontrun(address router, address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut, bytes data) payable returns (uint256)",
-  "function payMinerETH() payable",
-  "function payMinerERC20(address token, uint256 amount)",
-  "function emergencyWithdraw(address token, uint256 amount) onlyOwner",
-  "function withdraw(address token, uint256 amount) onlyOwner"
+export const MULTI_FLASH_LOAN_EXECUTOR_ABI = [
+  "function approvedFlashLoanProviders(address) view returns (bool)",
+  "function callFunction(address target, bytes data)",
+  "function depositToken(address token, uint256 amount)",
+  "function executeOperation(address[] assets, uint256[] amounts, uint256[] premiums, address initiator, bytes params) returns (bool)",
+  "function executeWithCollateral(tuple(address target, bytes data, bool requiresApproval, address approvalToken, uint256 approvalAmount)[] calls)",
+  "function onDeferredLiquidityCheck(bytes data)",
+  "function orchestrate(tuple(address provider, address token, uint256 amount)[] flashLoanRequests, tuple(address target, bytes data, bool requiresApproval, address approvalToken, uint256 approvalAmount)[] calls)",
+  "function owner() view returns (address)",
+  "function renounceOwnership()",
+  "function simulate(tuple(address provider, address token, uint256 amount)[] flashLoanRequests, tuple(address target, bytes data, bool requiresApproval, address approvalToken, uint256 approvalAmount)[] calls) view returns (uint256 profit)",
+  "function transferOwnership(address newOwner)",
+  "function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes data)",
+  "function withdrawToken(address token, uint256 amount)",
+  "event OwnershipTransferred(address indexed previousOwner, address indexed newOwner)"
 ];
 
-//---------------------------DEXES-----------------------------//
-export const STAKED_SLIPSTREAM_AM_ABI = [
-  "function ASSET_TYPE() view returns (uint256)",
-  "function assetToUnderlyingAssets(bytes32 assetKey, uint256) view returns (bytes32)",
-  "function balanceOf(address owner) view returns (uint256)",
-  "function baseURI() view returns (string)",
-  "function getApproved(uint256 tokenId) view returns (address)",
-  "function getRiskFactors(address creditor, address asset, uint256 assetId) view returns (uint16 collateralFactor, uint16 liquidationFactor)",
-  "function getValue(address asset, uint256 assetId) view returns (uint256)",
-  "function isApprovedForAll(address owner, address operator) view returns (bool)",
-  "function name() view returns (string)",
-  "function ownerOf(uint256 tokenId) view returns (address)",
-  "function registry() view returns (address)",
-  "function rewardToken() view returns (address)",
-  "function safeTransferFrom(address from, address to, uint256 tokenId)",
-  "function safeTransferFrom(address from, address to, uint256 tokenId, bytes data)",
-  "function setApprovalForAll(address operator, bool approved)",
-  "function supportsInterface(bytes4 interfaceId) view returns (bool)",
-  "function symbol() view returns (string)",
-  "function tokenURI(uint256 tokenId) view returns (string)",
-  "function transferFrom(address from, address to, uint256 tokenId)"
-];
+//ABI dos CONTRATOS DE ROUTERS
 
 export const UNISWAP_V2_ROUTER_ABI = [
-  "function getAmountsOut(uint256 amountIn, address[] memory path) view returns (uint256[] memory amounts)",
-  "function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] calldata path, address to, uint256 deadline) returns (uint256[] memory amounts)",
-  "function swapETHForExactTokens(uint256 amountOut, address[] calldata path, address to, uint256 deadline) payable returns (uint256[] memory amounts)",
-  {
-    "name": "getAmountsIn",
-    "type": "function",
-    "stateMutability": "view",
-    "inputs": [
-      { "type": "uint256", "name": "amountOut" },
-      { "type": "address[]", "name": "path" }
-    ],
-    "outputs": [
-      { "type": "uint256[]", "name": "amounts" }
-    ]
-  }
+  "function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)",
+  "function getAmountsIn(uint256 amountOut, address[] path) view returns (uint256[] amounts)",
+  "function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline) returns (uint256[] amounts)",
+  "function swapTokensForExactTokens(uint256 amountOut, uint256 amountInMax, address[] path, address to, uint256 deadline) returns (uint256[] amounts)",
+  "function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable returns (uint256[] amounts)",
+  "function swapETHForExactTokens(uint256 amountOut, address[] path, address to, uint256 deadline) payable returns (uint256[] amounts)",
+  "function swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline) returns (uint256[] amounts)",
+  "function swapTokensForExactETH(uint256 amountOut, uint256 amountInMax, address[] path, address to, uint256 deadline) returns (uint256[] amounts)"
 ];
 
+
 export const UNISWAP_V3_ROUTER_ABI = [
-  "function exactInputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)",
-  "function exactInput(tuple(bytes path, address recipient, uint256 amountIn, uint256 amountOutMinimum)) external payable returns (uint256 amountOut)",
-  "function exactOutputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountOut, uint256 amountInMaximum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountIn)",
-  "function exactOutput(tuple(bytes path, address recipient, uint256 amountOut, uint256 amountInMaximum)) external payable returns (uint256 amountIn)"
+  "function exactInputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)",
+  "function exactOutputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountOut, uint256 amountInMaximum, uint160 sqrtPriceLimitX96)) payable returns (uint256 amountIn)",
+  "function exactInput(tuple(bytes path, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum)) payable returns (uint256 amountOut)",
+  "function exactOutput(tuple(bytes path, address recipient, uint256 deadline, uint256 amountOut, uint256 amountInMaximum)) payable returns (uint256 amountIn)",
+  "function multicall(bytes[] data) payable returns (bytes[] results)",
+  "function unwrapWETH9(uint256 amountMinimum, address recipient) payable",
+  "function refundETH() payable",
+  "function sweepToken(address token, uint256 amountMinimum, address recipient) payable"
 ];
+
+export const CURVE_POOL_ABI = [
+  "function get_dy(int128 i, int128 j, uint256 dx) view returns (uint256)",
+  "function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy)",
+  "function get_dy_underlying(int128 i, int128 j, uint256 dx) view returns (uint256)",
+  "function exchange_underlying(int128 i, int128 j, uint256 dx, uint256 min_dy)",
+  "function exchange(uint256 i, uint256 j, uint256 dx, uint256 min_dy)",
+  "function get_dy(uint256 i, uint256 j, uint256 dx) view returns (uint256)"
+];
+
+
+//ABIS DOS CONTRATOS DE QUOTERS
 
 export const UNISWAP_V3_QUOTER_ABI = [
   "function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) external returns (uint256 amountOut)",
@@ -81,8 +75,7 @@ export const UNISWAP_V3_QUOTER_ABI = [
 ];
 
 
-
-
+//ABIS DOS CONTRATOS DE FACTORY
 
 export const MAVERICK_V2_PAIR_ABI = [
     "function getBin(uint128 binId) external view returns (Bin memory)",
@@ -90,70 +83,38 @@ export const MAVERICK_V2_PAIR_ABI = [
     "function liquidityMap() external view returns (uint256)"
 ];
 
-export const MAVERICK_QUOTER_ABI = [
-  {
-    "inputs": [
-      { "internalType": "address", "name": "tokenIn", "type": "address" },
-      { "internalType": "address", "name": "tokenOut", "type": "address" },
-      { "internalType": "uint256", "name": "amountOut", "type": "uint256" },
-      { "internalType": "uint160", "name": "sqrtPriceLimitX96", "type": "uint160" }
-    ],
-    "name": "quoteExactOutputSingle",
-    "outputs": [
-      { "internalType": "uint256", "name": "amountIn", "type": "uint256" }
-    ],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  }
-];
 
+//ABIS UNIFICADAS - SIMPLIFICAÇÃO
+export const ROUTER_ABIS = {
+UNISWAP_V2: ["function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline) returns (uint256[] amounts)"],
+UNISWAP_V3: ["function exactInputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)"],
+CURVE: ["function get_dy(int128 i, int128 j, uint256 dx) view returns (uint256)"],
+}
 
-export const AggregatorV3InterfaceABI = [
-  {
-    inputs: [],
-    name: "decimals",
-    outputs: [{ internalType: "uint8", name: "", type: "uint8" }],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "description",
-    outputs: [{ internalType: "string", name: "", type: "string" }],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "version",
-    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [{ internalType: "uint80", name: "_roundId", type: "uint80" }],
-    name: "getRoundData",
-    outputs: [
-      { internalType: "uint80", name: "roundId", type: "uint80" },
-      { internalType: "int256", name: "answer", type: "int256" },
-      { internalType: "uint256", name: "startedAt", type: "uint256" },
-      { internalType: "uint256", name: "updatedAt", type: "uint256" },
-      { internalType: "uint80", name: "answeredInRound", type: "uint80" },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "latestRoundData",
-    outputs: [
-      { internalType: "uint80", name: "roundId", type: "uint80" },
-      { internalType: "int256", name: "answer", type: "int256" },
-      { internalType: "uint256", name: "startedAt", type: "uint256" },
-      { internalType: "uint256", name: "updatedAt", type: "uint256" },
-      { internalType: "uint80", name: "answeredInRound", type: "uint80" },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-];
+export const FACTORY_ABIS = {
+  UNISWAP_V2: [ "function getPair(address, address) view returns (address)" ],
+  UNISWAP_V3: [ "function getPool(address, address, uint24) view returns (address)" ],
+  CURVE: [ "function find_pool_for_coins(address, address, uint256) view returns (address)" ]
+};
+
+export const POOL_ABIS = {
+  UNISWAP_V2: [
+    "function getReserves() view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)",
+    "function token0() view returns (address)",
+    "function token1() view returns (address)"
+  ],
+  UNISWAP_V3: [
+    "function liquidity() view returns (uint128)"
+  ],
+  CURVE: [
+    "function balances(uint256) view returns (uint256)"
+  ],
+};
+
+export const QUOTER_ABIS = {
+UNISWAP_V2: ["function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)"],
+UNISWAP_V3: ["function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) external returns (uint256 amountOut)"],
+CURVE: ["function get_dy(int128 i, int128 j, uint256 dx) view returns (uint256)"],
+
+};
+

@@ -1,529 +1,175 @@
- import { Result } from 'ethers/lib/utils';
-import { ethers, BigNumber } from "ethers";
-import { DexType, DecodedSwapTransaction } from "./types";
-import { enhancedLogger } from "./enhancedLogger";
+import { Interface, type BigNumberish, type Result } from "ethers";
+import { DexType } from "./types";
+import { ethers } from "ethers";
+import { FunctionFragment, Fragment } from "ethers";
 
-// ABI fragments for decoding swap methods
-const UNISWAP_V2_ROUTER_ABI = [
-  "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] path, address to, uint deadline) external returns (uint[] amounts)",
-  "function swapTokensForExactTokens(uint amountOut, uint amountInMax, address[] path, address to, uint deadline) external returns (uint[] amounts)",
-  "function swapExactETHForTokens(uint amountOutMin, address[] path, address to, uint deadline) external payable returns (uint[] amounts)",
-  "function swapTokensForExactETH(uint amountOut, uint amountInMax, address[] path, address to, uint deadline) external returns (uint[] amounts)",
-  "function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] path, address to, uint deadline) external returns (uint[] amounts)",
-  "function swapETHForExactTokens(uint amountOut, address[] path, address to, uint deadline) external payable returns (uint[] amounts)"
-];
-
-const UNISWAP_V3_ROUTER_ABI = [
-  "function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)",
-  "function exactInput((bytes path, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum)) external payable returns (uint256 amountOut)",
-  "function exactOutputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountOut, uint256 amountInMaximum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountIn)",
-  "function exactOutput((bytes path, address recipient, uint256 deadline, uint256 amountOut, uint256 amountInMaximum)) external payable returns (uint256 amountIn)"
-];
-
-const CURVE_ROUTER_ABI = [
-  "function exchange(int128 i, int128 j, uint256 dx, uint256 min_dy) external",
-];
-
-const MAVERICK_V2_ROUTER_ABI = [
-  "function swapExactInputSingle(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96) external returns (uint256 amountOut)",
-];
-
-const UNISWAP_V4_ROUTER_ABI = [
-  "function execute(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96) external returns (uint256 amountOut)",
-];
-
-// Router addresses for identifying DEXs
-const DEX_ROUTERS = {
-  uniswapv2: ["0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24"].map(a => a.toLowerCase()),
-  uniswapv3: ["0xE592427A0AEce92De3Edee1F18E0157C05861564", "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"].map(a => a.toLowerCase()),
-  sushiswapv2: ["0xA7caC4207579A179c1069435d032ee0F9F150e5c"].map(a => a.toLowerCase()),
-  sushiswapv3: ["0xA7caC4207579A179c1069435d032ee0F9F150e5c"].map(a => a.toLowerCase()),
-  camelot: ["0xc873fEcbd354f5A56E00E710B90EF4201db2448d", "0x6EeE6060f715257b970700bc2656De21dEdF074C"].map(a => a.toLowerCase()),
-  pancakeswapv3: ["0x13f4ea83d0bd40e75c8222255bc855a974568dd4"].map(a => a.toLowerCase()),
-  ramsesv2: ["0xaa273216cc9201a1e4285ca623f584badc736944"].map(a => a.toLowerCase()),
-  maverickv2:["0x5c3b380e5Aeec389d1014Da3Eb372FA2C9e0fc76"].map(a => a.toLowerCase()),
-  curve:["0x2191718cd32d02b8e60badffea33e4b5dd9a0a0d"].map(a => a.toLowerCase()),
-  uniswapv4:["0x2191718cd32d02b8e60badffea33e4b5dd9a0a0d"].map(a => a.toLowerCase()),
+export const dexAddressMap: Record<string, DexType> = {
+  "0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6": "uniswapv2",
+  "0xBCfCcbde45cE874adCB698cC183deBcF17952812": "pancakeswapv2",
+  "0xd6715A8be3944ec72738F0BFDC739d48C3c29349": "nomiswap",
+  "0x1097053Fd2ea711dad45caCcc45EfF7548fCB362": "pancakeswapv3",
+  "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7": "uniswapv3"
 };
 
+export const abiExactInput = [
+  "function exactInput((bytes path, address recipient, uint256 amountIn, uint256 amountOutMinimum) params) returns (uint256 amountOut)"
+];
 
+export const abiExactInputSingle = [
+  "function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96) params) returns (uint256 amountOut)"
+];
 
-/**
- * Decodes swap transactions from popular DEXes
- * @param tx Transaction object from ethers
- * @returns Decoded swap parameters or null if not a swap
- */
-export function decodeSwap(tx: ethers.providers.TransactionResponse): DecodedSwapTransaction | null {
-  try {
-    // Skip if no data or value is missing
-    if (!tx.data || !tx.to) return null;
-    
-    const lowercaseTo = tx.to.toLowerCase();
+export const abiExactOutput = [
+  "function exactOutput((bytes path, address recipient, uint256 amountOut, uint256 amountInMaximum) params) returns (uint256 amountIn)"
+];
 
-    // Try to identify the DEX based on the router address
-    let dexType: DexType;
-    for (const [key, addresses] of Object.entries(DEX_ROUTERS)) {
-      if (addresses.includes(lowercaseTo)) {
-        dexType = key.toLowerCase() as DexType;
-        break;
-      }
+export const abiExactOutputSingle = [
+  "function exactOutputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountOut, uint256 amountInMaximum, uint160 sqrtPriceLimitX96) params) returns (uint256 amountIn)"
+];
+
+export const abiSwapExactTokensForTokens = [
+  "function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline) returns (uint256[] amounts)"
+];
+
+export const abiSwapTokensForExactTokens = [
+  "function swapTokensForExactTokens(uint256 amountOut, uint256 amountInMax, address[] path, address to, uint256 deadline) returns (uint256[] amounts)"
+];
+
+export const abiSwapExactETHForTokens = [
+  "function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable returns (uint256[] amounts)"
+];
+
+export const abiSwapETHForExactTokens = [
+  "function swapETHForExactTokens(uint256 amountOut, address[] path, address to, uint256 deadline) payable returns (uint256[] amounts)"
+];
+
+export const abiSwapExactTokensForETH = [
+  "function swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline) returns (uint256[] amounts)"
+];
+
+export const abiSwapTokensForExactETH = [
+  "function swapTokensForExactETH(uint256 amountOut, uint256 amountInMax, address[] path, address to, uint256 deadline) returns (uint256[] amounts)"
+];
+
+const interfaces = {
+  exactInput: new Interface(abiExactInput),
+  exactInputSingle: new Interface(abiExactInputSingle),
+  exactOutput: new Interface(abiExactOutput),
+  exactOutputSingle: new Interface(abiExactOutputSingle),
+  swapExactTokensForTokens: new Interface(abiSwapExactTokensForTokens),
+  swapTokensForExactTokens: new Interface(abiSwapTokensForExactTokens),
+  swapExactETHForTokens: new Interface(abiSwapExactETHForTokens),
+  swapETHForExactTokens: new Interface(abiSwapETHForExactTokens),
+  swapExactTokensForETH: new Interface(abiSwapExactTokensForETH),
+  swapTokensForExactETH: new Interface(abiSwapTokensForExactETH)
+};
+
+const selectorMap: Record<
+  string,
+  { type: keyof typeof interfaces; iface: Interface }
+> = {};
+
+for (const [type, iface] of Object.entries(interfaces)) {
+  for (const fragment of iface.fragments) {
+    if (fragment.type === "function") {
+      // fragment é FunctionFragment
+      const functionFragment = fragment as FunctionFragment;
+      const selector = functionFragment.selector;
+      selectorMap[selector] = { type: type as keyof typeof interfaces, iface };
     }
-    
-    // If we couldn't identify the DEX, bail out
-    if (!dexType) return null;
-    
-    // Create the appropriate interface for parsing
-    let iface: ethers.utils.Interface;
-    
-    if (dexType.includes('uniswapv2')) {
-      iface = new ethers.utils.Interface(UNISWAP_V2_ROUTER_ABI);
-    } else if (dexType.includes('sushiswapv2')) {
-      iface = new ethers.utils.Interface(UNISWAP_V2_ROUTER_ABI);
-    } else if (dexType.includes('camelot')) {
-      iface = new ethers.utils.Interface(UNISWAP_V2_ROUTER_ABI);
-    } else if (dexType.includes('uniswapv3')) {
-      iface = new ethers.utils.Interface(UNISWAP_V3_ROUTER_ABI);
-    } else if (dexType.includes('sushiswapv3')) {
-      iface = new ethers.utils.Interface(UNISWAP_V3_ROUTER_ABI);
-    } else if (dexType.includes('pancakeswapv3')) {
-      iface = new ethers.utils.Interface(UNISWAP_V3_ROUTER_ABI);
-    } else if (dexType.includes('ramsesv2')) {
-      iface = new ethers.utils.Interface(UNISWAP_V3_ROUTER_ABI);
-    } else if (dexType.includes('maverickv2')) {
-      iface = new ethers.utils.Interface(MAVERICK_V2_ROUTER_ABI);
-    } else if (dexType.includes('curve')) {
-      iface = new ethers.utils.Interface(CURVE_ROUTER_ABI);
-    } else if (dexType.includes('uniswapv4')) {
-      iface = new ethers.utils.Interface(UNISWAP_V4_ROUTER_ABI);
-    } else {
-      return null; // Unsupported DEX type
-    }
-    
-    // Try to decode the transaction
-    let decodedData;
-    try {
-      decodedData = iface.parseTransaction({ data: tx.data });
-    } catch (e) {
-      // Not a swap transaction we can decode
-      return null;
-    }
-    
-    if (!decodedData) return null;
-    
-    const functionName = decodedData.name;
-    const args = decodedData.args;
-    
-    // Handle different router types and methods  
-    switch (dexType) {
-  case "uniswapv2":
-  case "sushiswapv2":
-  case "camelot":
-    return decodeV2Swap(functionName, args, dexType, tx.value);
-    
-  case "uniswapv3":
-  case "sushiswapv3":
-  case "pancakeswapv3":
-  case "ramsesv2": 
-    return decodeV3Swap(functionName, args, dexType, tx.value);
-    
-  case "uniswapv4":
-    return decodeUniswapV4Swap(functionName, args, dexType, tx.value);
-    
-  case "maverickv2":
-    return decodeMaverickV2Swap(functionName, args, dexType, tx.value);
-    
-  case "curve":
-    return decodeCurveSwap(functionName, args, dexType, tx.value, tx.to);
-    
-  default:
-    return null;
-}
-  } catch (err) {
-    enhancedLogger.error(`Error decoding swap: ${err}`, {
-      botType: "scanner"
-    });
-    return null;
   }
 }
 
-/**
- * Decode Uniswap V2-style router transactions
- */
-function decodeV2Swap(
-  functionName: string,
-  args: ethers.utils.Result,
-  dexType: DexType,
-  value: ethers.BigNumber
-): DecodedSwapTransaction | null {
-  try {
-    const WETH = "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"; // WETH on Arbitrum
-    
-    // Handle different swap functions
-    switch (functionName) {
-      case "swapExactTokensForTokens": {
-        const [amountIn, amountOutMin, path, to] = args;
-        return {
-          tokenIn: path[0],
-          tokenOut: path[path.length - 1],
-          amountIn,
-          amountOutMin,
-          path,
-          deadline: args[4],
-          dex: dexType
-        };
-      }
-      
-      case "swapTokensForExactTokens": {
-        const [amountOut, amountInMax, path, to] = args;
-        return {
-          tokenIn: path[0],
-          tokenOut: path[path.length - 1],
-          amountIn: amountInMax, // max amount in
-          amountOutMin: amountOut, // exact amount out
-          path,
-          deadline: args[4],
-          dex: dexType
-        };
-      }
-      
-      case "swapExactETHForTokens": {
-        const [amountOutMin, path, to] = args;
-        return {
-          tokenIn: WETH,
-          tokenOut: path[path.length - 1],
-          amountIn: value, // ETH value sent with tx
-          amountOutMin,
-          path: [WETH, ...path.slice(1)], // Path should start with WETH
-          deadline: args[3],
-          dex: dexType
-        };
-      }
-      
-      case "swapExactTokensForETH": {
-        const [amountIn, amountOutMin, path, to] = args;
-        return {
-          tokenIn: path[0],
-          tokenOut: WETH,
-          amountIn,
-          amountOutMin,
-          path: [...path.slice(0, -1), WETH], // Path should end with WETH
-          deadline: args[4],
-          dex: dexType
-        };
-      }
-      
-      // Add other cases as needed
-      
-      default:
-        return null;
+function normalizeDecodedArgs(decodedArgs: Result): Record<string, any> {
+  const args: Record<string, any> = {};
+  for (const [key, value] of Object.entries(decodedArgs)) {
+    if (!/^\d+$/.test(key)) {
+      args[key] = value;
     }
-  } catch (err) {
-    enhancedLogger.error(`Error decoding V2 swap: ${err}`, {
-      botType: "scanner"
-    });
-    return null;
   }
+  return args;
 }
 
-/**
- * Decode Uniswap V3-style router transactions
- */
-function decodeV3Swap(
-  functionName: string,
-  args: ethers.utils.Result,
-  dexType: DexType,
-  value: ethers.BigNumber
-): DecodedSwapTransaction | null {
-  try {
-    const WETH = "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"; // WETH on Arbitrum
-    
-    // Handle different swap functions
-    switch (functionName) {
-      case "exactInputSingle": {
-        const {
-          tokenIn,
-          tokenOut,
-          amountIn,
-          amountOutMinimum,
-          recipient
-        } = args[0];
-        
-        return {
-          tokenIn,
-          tokenOut,
-          amountIn: tokenIn.toLowerCase() === WETH.toLowerCase() && value.gt(0) ? value : amountIn,
-          amountOutMin: amountOutMinimum,
-          dex: dexType,
-        };
-      }
-      
-      case "exactInput": {
-        const {
-          path: pathBytes,
-          amountIn,
-          amountOutMinimum,
-          recipient
-        } = args[0];
-        
-        // Decode path from bytes in V3
-        const path = decodeV3Path(pathBytes);
-        if (!path || path.length < 2) return null;
-        
-        return {
-          tokenIn: path[0].token,
-          tokenOut: path[path.length - 1].token,
-          amountIn: path[0].token.toLowerCase() === WETH.toLowerCase() && value.gt(0) ? value : amountIn,
-          amountOutMin: amountOutMinimum,
-          dex:dexType
-        };
-      }
-      
-      // Add other cases as needed
-      
-      default:
-        return null;
-    }
-  } catch (err) {
-    enhancedLogger.error(`Error decoding V3 swap: ${err}`, {
-      botType: "scanner"
-    });
-    return null;
+function parseSwapArgsLoose(args: Record<string, any>): {
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: BigNumberish;
+  amountOutMin: BigNumberish;
+} | null {
+  let tokenIn: string | undefined = undefined;
+  let tokenOut: string | undefined = undefined;
+  let amountIn: BigNumberish | undefined = undefined;
+  let amountOutMin: BigNumberish | undefined = undefined;
+
+  if ("tokenIn" in args) tokenIn = args.tokenIn;
+  else if ("path" in args && Array.isArray(args.path) && args.path.length > 0) tokenIn = args.path[0];
+
+  if ("tokenOut" in args) tokenOut = args.tokenOut;
+  else if ("path" in args && Array.isArray(args.path) && args.path.length > 1) tokenOut = args.path[args.path.length - 1];
+
+  if ("amountIn" in args) amountIn = args.amountIn;
+  else if (args.params && "amountIn" in args.params) amountIn = args.params.amountIn;
+
+  if ("amountOutMin" in args) amountOutMin = args.amountOutMin;
+  else if ("amountOutMinimum" in args) amountOutMin = args.amountOutMinimum;
+  else if ("minReturnAmount" in args) amountOutMin = args.minReturnAmount;
+
+  if (tokenIn && tokenOut && amountIn !== undefined && amountOutMin !== undefined) {
+    return { tokenIn, tokenOut, amountIn, amountOutMin };
   }
+
+  return null;
 }
 
+export function decodeSwap(
+  data: string,
+  value: BigNumberish,
+  to: string
+): {
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: BigNumberish;
+  amountOutMin: BigNumberish;
+  dex: DexType;
+  extraParams: Record<string, any>;
+} | null {
+  const selector = data.slice(0, 10);
+  const match = selectorMap[selector];
 
-export function decodeCurveSwap(
-    functionName: string,
-    args: ethers.utils.Result,
-    dexType: DexType,
-    value: BigNumber,
-    txFrom: string = ""
-): DecodedSwapTransaction | null {
-  try {
-    if (functionName === "exchange" || functionName === "exchange_underlying") {
-      const i = args[0];
-      const j = args[1];
-      const dx = args[2];
-      const minDy = args[3];
-
-      return {
-        tokenIn: i,
-        tokenOut: j,
-        amountIn: dx,
-        amountOutMin: minDy,
-        dex: dexType,
-      };
-    }
-
-    if (functionName === "exchange_multiple") {
-      const routes = args[0];
-      const swapParams = args[1];
-      const amountIn = args[2];
-      const minAmountOut = args[3];
-
-      return {
-        tokenIn: routes[0],
-        tokenOut: routes[routes.length - 1],
-        amountIn,
-        amountOutMin: minAmountOut,
-        dex: dexType,
-      };
-    }
-
-    return null;
-  } catch (err) {
-    console.error("Curve decode error:", err);
-    return null;
+  if (!match) {
+    return null;  // selector não encontrado
   }
-}
 
-export function decodeMaverickV2Swap(
-  functionName: string,
-  args: ethers.utils.Result,
-  dexType: DexType,
-  value: BigNumber
-): DecodedSwapTransaction | null {
-  try {
-    if (functionName === "exactInputSingle") {
-      const params = args[0];
-
-      return {
-        tokenIn: params.tokenIn,
-        tokenOut: params.tokenOut,
-        amountIn: params.amountIn,
-        amountOutMin: params.amountOutMinimum,
-        dex: dexType,
-      };
-    }
-
-    if (functionName === "exactInput") {
-      const params = args[0];
-      const { tokenIn, tokenOut } = decodeMaverickPath(params.path);
-
-      return {
-        tokenIn,
-        tokenOut,
-        amountIn: params.amountIn,
-        amountOutMin: params.amountOutMinimum,
-        dex: dexType,
-      };
-    }
-
-    return null;
-  } catch (err) {
-    console.error("MaverickV2 decode error:", err);
-    return null;
+  const dex = dexAddressMap[to.toLowerCase()];
+  if (!dex) {
+    return null;  // endereço da DEX não mapeado
   }
-}
 
-export function decodeUniswapV4Swap(
-  functionName: string,
-  args: ethers.utils.Result,
-  dexType: DexType,
-  value: ethers.BigNumberish
-): DecodedSwapTransaction | null {
+  const { iface } = match;
+
   try {
-    let tokenIn = "";
-    let tokenOut = "";
-    let amountIn: ethers.BigNumber = ethers.constants.Zero;
-    let minAmountOut: ethers.BigNumber = ethers.constants.Zero;
+    const parsed = iface.parseTransaction({ data, value });
+    if (!parsed) {
+      return null;  // não conseguiu parsear
+    }
+    const args = normalizeDecodedArgs(parsed.args);
+    const parsedArgs = parseSwapArgsLoose(args);
 
-    if (functionName === "swapExactInSingle") {
-      const {
-        poolKey,
-        amountIn: amtIn,
-        amountOutMinimum,
-        hookData
-      } = args[0]; // assume-se que é struct
-
-      tokenIn = poolKey.currency0;
-      tokenOut = poolKey.currency1;
-      amountIn = amtIn;
-      minAmountOut = amountOutMinimum;
+    if (!parsedArgs) {
+      return null;  // não conseguiu extrair todos os argumentos obrigatórios
     }
 
-    else if (
-      functionName === "settleAll" ||
-      functionName === "settle" ||
-      functionName === "takeAll" ||
-      functionName === "take"
-    ) {
-      const params = args[0]; // assume-se que params é array de bytes
-
-      if (params.length >= 3) {
-        try {
-          const [currency0, amtIn] = ethers.utils.defaultAbiCoder.decode(
-            ["address", "uint256"],
-            params[1]
-          );
-          const [currency1, minOut] = ethers.utils.defaultAbiCoder.decode(
-            ["address", "uint256"],
-            params[2]
-          );
-
-          tokenIn = currency0;
-          tokenOut = currency1;
-          amountIn = amtIn;
-          minAmountOut = minOut;
-        } catch (decodeErr) {
-          console.warn("Erro ao decodificar params[1] ou [2]:", decodeErr);
-          return null;
-        }
-      } else {
-        return null;
-      }
-    }
-
-    if (!tokenIn || !tokenOut || amountIn.isZero()) {
-      return null;
-    }
+    const { tokenIn, tokenOut, amountIn, amountOutMin } = parsedArgs;
 
     return {
-      dex: dexType,
       tokenIn,
       tokenOut,
       amountIn,
-      amountOutMin: minAmountOut, 
+      amountOutMin,
+      dex,
+      extraParams: args
     };
-  } catch (err) {
-    console.error("Erro no decoder UniswapV4:", err);
-    return null;
+  } catch (e) {
+    return null;  // falha na decodificação
   }
-}
-
-/**
- * Helper to decode UniswapV3 path bytes
- */
-function decodeV3Path(pathBytes: string): { token: string, fee: number }[] | null {
-  try {
-    if (!pathBytes || pathBytes.length < 40) return null;
-    
-    const result = [];
-    let position = 2; // skip 0x
-    
-    // First token
-    let token = '0x' + pathBytes.substr(position, 40);
-    position += 40;
-    
-    while (position + 6 < pathBytes.length) {
-      // Read fee
-      const fee = parseInt(pathBytes.substr(position, 6), 16);
-      position += 6;
-      
-      // Add previous token with its outgoing fee
-      result.push({ token, fee });
-      
-      // Read next token if we have enough bytes left
-      if (position + 40 <= pathBytes.length) {
-        token = '0x' + pathBytes.substr(position, 40);
-        position += 40;
-      }
-    }
-    
-    // Add final token (without outgoing fee)
-    result.push({ token, fee: 0 });
-    
-    return result;
-  } catch (err) {
-    enhancedLogger.error(`Error decoding V3 path: ${err}`, {
-      botType: "scanner"
-    });
-    return null;
-  }
-}
-
-function decodeMaverickPath(path: string): { tokenIn: string; tokenOut: string } {
-  if (!path || path.length < 86) throw new Error("Invalid path");
-
-  // token = 20 bytes (40 hex chars), fee = 3 bytes (6 hex chars)
-  const stepSize = 40 + 6; // 46
-
-  const tokenIn = "0x" + path.slice(2, 42);
-
-  const hops = Math.floor((path.length - 2) / stepSize);
-  const tokenOutStart = 2 + (stepSize * (hops - 1)) + 46;
-  const tokenOut = "0x" + path.slice(tokenOutStart, tokenOutStart + 40);
-
-  return { tokenIn, tokenOut };
-}
-
-function decodeSwapCommandInput(swapInput: string): {
-  tokenIn: string;
-  tokenOut: string;
-  amountIn: BigNumber;
-  amountOutMin: BigNumber;
-} {
-  const abiCoder = new ethers.utils.AbiCoder();
-
-  const [tokenIn, tokenOut, amountIn, amountOutMin, recipient] = abiCoder.decode(
-    ["address", "address", "uint256", "uint256", "address"],
-    swapInput
-  );
-
-  return {
-    tokenIn,
-    tokenOut,
-    amountIn,
-    amountOutMin,
-  };
 }

@@ -1,4 +1,6 @@
 import { ethers } from "ethers";
+import { WETH } from "../../constants/addresses";
+import { uniswapv3Router } from "../../constants/addresses";
 
 export function buildSwapToETHCall({
   tokenIn,
@@ -9,8 +11,8 @@ export function buildSwapToETHCall({
   amountIn: string;
   recipient: string;
 }) {
-  const WETH = "0x82af49447d8a07e3bd95bd0d56f35241523fbab1"; // WETH Arbitrum
-  const router = "0xE592427A0AEce92De3Edee1F18E0157C05861564"; // Uniswap V3 router
+
+  const router = uniswapv3Router; // Uniswap V3 router
   const fee = 3000; // 0.3%
   const deadline = Math.floor(Date.now() / 1000) + 60 * 5;
 
@@ -18,7 +20,7 @@ export function buildSwapToETHCall({
     "function exactInputSingle(tuple(address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96))"
   ];
 
-  const iface = new ethers.utils.Interface(abi);
+  const iface = new ethers.Interface(abi);
 
   const data = iface.encodeFunctionData("exactInputSingle", [{
     tokenIn,

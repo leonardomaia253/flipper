@@ -1,30 +1,96 @@
 import axios from 'axios';
+import fs from 'fs/promises';
+import path from 'path';
+import { DexPair } from './types';
 
-interface TokenInfo {
-  address: string;
-  symbol: string;
-  decimals: number;
+
+const OUTPUT_FILE = path.join(__dirname, 'base_dex_pairs.json');
+const CACHE_DURATION_MS = 86_400_000; // 24 horas
+
+const ALLOWED_DEXES = [
+ "uniswap-v3",
+"uniswapv2",
+"uniswapv4",
+"thenafusion",
+"pancakeswapv3",
+"pancakeswapv2",
+"nomiswap",
+];
+
+interface CacheMeta {
+  timestamp: number;
+  data: DexPair[];
 }
 
-export async function fetchTopTokensArbitrum(limit: number = 200): Promise<TokenInfo[]> {
+let cache: CacheMeta | null = null;
+
+async function loadCache(): Promise<void> {
   try {
-    const response = await axios.get('https://api.llama.fi/token/arbitrum');
-    const tokens = response.data.tokens as any[];
+    const content = await fs.readFile(OUTPUT_FILE, 'utf-8');
+    const parsed: CacheMeta = JSON.parse(content);
+    if (Date.now() - parsed.timestamp < CACHE_DURATION_MS) {
+      cache = parsed;
+      console.log('✅ Cache carregado e válido.');
+    } else {
+      console.log('ℹ️ Cache expirado, será atualizado.');
+    }
+  } catch {
+    console.log('ℹ️ Nenhum cache encontrado, será criado.');
+  }
+}
 
-    // Ordena os tokens por volume de 24h em ordem decrescente
-    tokens.sort((a, b) => b.volume24hUSD - a.volume24hUSD);
+async function saveCache(data: DexPair[]): Promise<void> {
+  const meta: CacheMeta = {
+    timestamp: Date.now(),
+    data
+  };
+  await fs.writeFile(OUTPUT_FILE, JSON.stringify(meta, null, 2));
+  console.log(`✅ ${data.length} pares salvos em cache: ${OUTPUT_FILE}`);
+}
 
-    // Seleciona os top 'limit' tokens
-    const topTokens = tokens.slice(0, limit);
+export async function fetchDexScreenerPairsBinance(limit = 500): Promise<DexPair[]> {
+  await loadCache();
+  if (cache) {
+    console.log('✅ Usando cache de pares.');
+    return cache.data.slice(0, limit);
+  }
 
-    // Mapeia para o formato TokenInfo
-    return topTokens.map(token => ({
-      address: token.address,
-      symbol: token.symbol,
-      decimals: token.decimals,
-    }));
-  } catch (error) {
-    console.error('Erro ao buscar tokens da DeFiLlama:', error);
+  try {
+    const url = 'https://api.dexscreener.com/latest/dex/pairs/binance';
+    const response = await axios.get<{ pairs: any[] }>(url);
+
+    const filteredPairs: DexPair[] = response.data.pairs
+      .filter(p => ALLOWED_DEXES.includes(p.dexId))
+      .slice(0, limit)
+      .map(p => ({
+        pairaddress: p.pairaddress,
+        dex: p.dexId,
+        url: p.url,
+        tokenIn: {
+          address: p.baseToken.address,
+          symbol: p.baseToken.symbol,
+          decimals:p.baseToken.decimals
+        },
+        tokenOut: {
+          address: p.quoteToken.adress,
+          symbol: p.quoteToken.symbol,
+          decimals: p.quoteToken.decimals,
+        },
+        liquidity: {
+          usd: Number(p.liquidity?.usd) || 0,
+        },
+        volume24h: {
+          usd: Number(p.volume?.h24) || 0,
+        },
+        priceNative: p.priceNative,
+        priceUsd: p.priceUsd,
+      }));
+
+    await saveCache(filteredPairs);
+
+    return filteredPairs;
+  } catch (err) {
+    console.error('❌ Erro ao buscar ou processar pares:', err);
     return [];
   }
 }

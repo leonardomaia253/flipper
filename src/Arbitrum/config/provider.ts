@@ -1,22 +1,69 @@
-
-import { ethers } from "ethers";
+import WebSocket from "ws";
+global.WebSocket = WebSocket as any;
+import { ethers, JsonRpcProvider,WebSocketProvider, Wallet} from "ethers";
 import * as dotenv from "dotenv";
 import * as path from "path";
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
-dotenv.config({ path: path.resolve(__dirname, "../../Arbitrum/.env") });
+type SupportedProvider = ethers.JsonRpcProvider | ethers.WebSocketProvider;
 
 
-// Create a provider instance
-export const provider = new ethers.providers.JsonRpcProvider(
-  "https://arb-mainnet.g.alchemy.com/v2/o--1ruggGezl5R36rrSDX8JiVouHQOJO"
-);
+// Fallback HTTP provider (para chamadas: getBalance, call, estimateGas, etc.)
+export const multiprovider = new ethers.JsonRpcProvider(process.env.RPC_COMUM!,42161);
+export const alchemysupport= new ethers.JsonRpcProvider(process.env.ALCHEMY_RPC!,42161);
+export const blastprovider = new ethers.WebSocketProvider(process.env.BLASTPROVIDER!,42161);
+export const quicknodeprovider = new ethers.WebSocketProvider(process.env.QUICKNODEPROVIDER!,42161);
+export const alchemyprovider = new ethers.WebSocketProvider(process.env.ALCHEMY_WSS!,42161);
+export const infuraprovider = new ethers.WebSocketProvider(process.env.INFURA_WSS!,42161);
+export const infurasupport = new ethers.JsonRpcProvider(process.env.INFURA_RPC!,42161);
+export const tenderlyprovider = new ethers.WebSocketProvider(process.env.TENDERLY_WSS!,42161);
+export const tenderlysupport = new ethers.JsonRpcProvider(process.env.TENDERLY_RPC!,42161);
+export const quicknodesupport = new ethers.JsonRpcProvider(process.env.QUICKNODESUPPORT!,42161);
 
-// Export a function to get a fresh provider instance
-export function getProvider(): ethers.providers.JsonRpcProvider {
-  return new ethers.providers.JsonRpcProvider(
-    "https://arb-mainnet.g.alchemy.com/v2/o--1ruggGezl5R36rrSDX8JiVouHQOJO"
-  );
+
+
+
+interface ProviderWithUrl {
+  provider: ethers.Provider;
+  url: string;
 }
+
+export const providerhttp: ProviderWithUrl[] = [
+  { provider: multiprovider, url: process.env.RPC_COMUM!},
+  { provider: alchemysupport, url: process.env.ALCHEMY_RPC!},
+  { provider: infurasupport, url: process.env.INFURA_RPC!},
+  { provider: tenderlysupport, url: process.env.TENDERLY_RPC!},
+  { provider: quicknodesupport, url: process.env.QUICKNODESUPPORT!},
+];
+
+export const providerwss: ProviderWithUrl[] = [
+  { provider: blastprovider, url: process.env.BLASTPROVIDER! },
+  { provider: quicknodeprovider, url: process.env.QUICKNODEPROVIDER!},
+  { provider: alchemyprovider, url: process.env.ALCHEMY_WSS!},
+  { provider: infuraprovider, url: process.env.INFURA_WSS!},
+  { provider: tenderlyprovider, url: process.env.TENDERLY_WSS!},
+];
+
+export const providersimplehttp: JsonRpcProvider[] = [
+  multiprovider,
+  alchemysupport,
+  infurasupport,
+  tenderlysupport,
+  quicknodesupport
+];
+
+export const providersimplewss: WebSocketProvider[] = [
+  blastprovider,
+  quicknodeprovider,
+  tenderlyprovider
+];
+
+export const PRIVATE_KEY = process.env.PRIVATE_KEY!;
+
+
+// Ajuste o pollingInterval conforme necessidade
+multiprovider.pollingInterval = 10; // 1 segundo
+alchemysupport.pollingInterval = 10;
 
 // Tenderly configuration for simulations
 export const TENDERLY_CONFIG = {
@@ -45,3 +92,4 @@ export const ARBITRUM_CONFIG = {
   defaultGasMultiplier: 1.2,
   maxGasPriceGwei: 30
 };
+

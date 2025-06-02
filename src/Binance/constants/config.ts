@@ -2,13 +2,8 @@ import { ethers } from "ethers";
 import * as dotenv from "dotenv";
 import * as path from "path";
 
-dotenv.config({ path: path.resolve(__dirname, "../../Arbitrum/.env") });
+dotenv.config({ path: path.resolve(__dirname, "../../Binance/.env") });
 
-
-export function getProvider(): ethers.providers.WebSocketProvider {
-  const wsUrl = "wss://arb-mainnet.g.alchemy.com/v2/o--1ruggGezl5R36rrSDX8JiVouHQOJO";
-  return new ethers.providers.WebSocketProvider(wsUrl);
-}
 // Tenderly configuration for simulations
 export const TENDERLY_CONFIG = {
   account: "Volup",
@@ -31,7 +26,7 @@ export const MEV_SHARE_CONFIG = {
 
 // Network configuration
 export const ARBITRUM_CONFIG = {
-  chainId: 42161,
+  chainId: 56,
   blockTime: 0.25, // in seconds
   defaultGasMultiplier: 1.2,
   maxGasPriceGwei: 30

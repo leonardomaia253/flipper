@@ -17,7 +17,7 @@ export function buildAaveLiquidation({
   user: string;
 }): CallData {
   const aavePool = "0x794a61358D6845594F94dc1DB02A252b5b4814aD";
-  const iface = new ethers.utils.Interface([
+  const iface = new ethers.Interface([
     "function liquidationCall(address,address,address,uint256,bool) external"
   ]);
 
@@ -35,7 +35,7 @@ export function buildAaveLiquidation({
     dex: "uniswapv3",
     requiresApproval: true,
     approvalToken: fromToken,
-    approvalAmount: ethers.BigNumber.from(amount),
+    approvalAmount: ethers.toBigInt(amount),
     target: aavePool,  // for compatibility
     callData: data     // for compatibility
   };
@@ -56,7 +56,7 @@ export function buildCompoundLiquidation({
   amount: string;
 }): CallData {
   const compoundPool = "0x5345B5f4f3bFf1F4C1A2aFf3Ff1F4C1A2aFf3Ff1";
-  const iface = new ethers.utils.Interface([
+  const iface = new ethers.Interface([
     "function liquidateBorrow(address borrower, uint repayAmount, address cTokenCollateral) external"
   ]);
 
@@ -72,7 +72,7 @@ export function buildCompoundLiquidation({
     dex: "uniswapv3",
     requiresApproval: true,
     approvalToken: cTokenBorrowed,
-    approvalAmount: ethers.BigNumber.from(amount),
+    approvalAmount: ethers.toBigInt(amount),
     target: compoundPool,  // for compatibility
     callData: data     // for compatibility
   };
@@ -94,7 +94,7 @@ export function buildMorphoLiquidation({
   borrower: string;
 }): CallData {
   const morphoBlue = "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb";
-  const iface = new ethers.utils.Interface([
+  const iface = new ethers.Interface([
     "function liquidate((address,address,uint24,bytes32), address, uint256, address) external"
   ]);
 
@@ -111,7 +111,7 @@ export function buildMorphoLiquidation({
     dex: "uniswapv3",
     requiresApproval: true,
     approvalToken: fromToken,
-    approvalAmount: ethers.BigNumber.from(amount),
+    approvalAmount: ethers.toBigInt(amount),
     target: morphoBlue,  // for compatibility
     callData: data     // for compatibility
   };
@@ -131,7 +131,7 @@ export function buildSparkLiquidation({
   user: string;
 }): CallData {
   const sparkPool = "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb";
-  const iface = new ethers.utils.Interface([
+  const iface = new ethers.Interface([
     "function liquidationCall(address,address,address,uint256,bool) external"
   ]);
 
@@ -149,7 +149,7 @@ export function buildSparkLiquidation({
     dex: "uniswapv3",
     requiresApproval: true,
     approvalToken: fromToken,
-    approvalAmount: ethers.BigNumber.from(amount),
+    approvalAmount: ethers.toBigInt(amount),
     target: sparkPool,  // for compatibility
     callData: data     // for compatibility
   };
@@ -169,7 +169,7 @@ export function buildVenusLiquidation({
   amount: string;
 }): CallData {
   const venusPool = "0x5345B5f4f3bFf1F4C1A2aFf3Ff1F4C1A2aFf3Ff1";
-  const iface = new ethers.utils.Interface([
+  const iface = new ethers.Interface([
     "function liquidateBorrow(address borrower, uint repayAmount, address vTokenCollateral) external"
   ]);
 
@@ -185,7 +185,7 @@ export function buildVenusLiquidation({
     dex: "uniswapv3",
     requiresApproval: true,
     approvalToken: vTokenBorrowed,
-    approvalAmount: ethers.BigNumber.from(amount),
+    approvalAmount: ethers.toBigInt(amount),
     target: venusPool,  // for compatibility
     callData: data     // for compatibility
   };

@@ -1,6 +1,6 @@
 
 import { ethers } from "ethers";
-import { DexType } from "../utils/types";
+import { DexType } from "./types";
 import { DEX_ROUTER } from "../constants/addresses";
 
 // ABIs - simplified for demonstration
@@ -28,10 +28,10 @@ const CurveRouterABI = [
 /**
  * Obtém instância do contrato de router para o DEX especificado
  */
-export function getRouterContract(dexType: DexType, provider: ethers.providers.Provider): ethers.Contract {
-  const routerAddress = DEX_ROUTER[dexType];
+export function getRouterContract(dexType: DexType, provider: ethers.Provider): ethers.Contract {
+  const routeraddress = DEX_ROUTER[dexType];
   
-  if (!routerAddress) {
+  if (!routeraddress) {
     throw new Error(`Endereço do router não encontrado para DEX: ${dexType}`);
   }
   
@@ -39,40 +39,26 @@ export function getRouterContract(dexType: DexType, provider: ethers.providers.P
   let routerAbi;
   switch(dexType) {
     case 'uniswapv2':
-    case 'camelot':
     case 'sushiswapv2':
       routerAbi = UniswapV2RouterABI;
       break;
       
     case 'uniswapv3':
-    case 'pancakeswapv3':
-    case 'sushiswapv3':
-    case 'ramsesv2':    
+    case 'sushiswapv3':   
       routerAbi = UniswapV3RouterABI;
-      break;
-      
-    case 'curve':
-      routerAbi = CurveRouterABI;
-      break;
-      
-    case 'maverickv2':
-      routerAbi = MaverickV2RouterABI;
-      break;
-    case 'uniswapv4':
-      routerAbi = UniswapV4RouterABI;
       break;
       
     default:
       throw new Error(`ABI não disponível para DEX: ${dexType}`);
   }
   
-  return new ethers.Contract(routerAddress, routerAbi, provider);
+  return new ethers.Contract(routeraddress, routerAbi, provider);
 }
 
 /**
  * Obtém instância de um token ERC20
  */
-export function getERC20Contract(tokenAddress: string, provider: ethers.providers.Provider): ethers.Contract {
+export function getERC20Contract(tokenaddress: string, provider: ethers.Provider): ethers.Contract {
   const erc20Abi = [
     "function balanceOf(address owner) view returns (uint256)",
     "function decimals() view returns (uint8)",
@@ -82,5 +68,5 @@ export function getERC20Contract(tokenAddress: string, provider: ethers.provider
     "function approve(address spender, uint256 amount) returns (bool)"
   ];
   
-  return new ethers.Contract(tokenAddress, erc20Abi, provider);
+  return new ethers.Contract(tokenaddress, erc20Abi, provider);
 }

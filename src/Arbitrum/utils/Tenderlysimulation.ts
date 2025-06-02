@@ -1,11 +1,10 @@
 import axios from 'axios';
-import { ethers } from 'ethers';
+import { ethers, BigNumberish } from 'ethers';
 import { createContextLogger } from './enhancedLogger';
 import * as dotenv from "dotenv";
 import * as path from "path";
 
 dotenv.config({ path: path.resolve(__dirname, "../../Arbitrum/.env") });
-
 
 // Create a context-aware logger for this module
 const log = createContextLogger({
@@ -51,14 +50,14 @@ export async function simulateBundleWithTenderly(
       txCount: transactions.length,
       options: {
         blockNumber: options.blockNumber,
-        networkId: options.networkId || '42161', // Default to Arbitrum
+        networkId: options.networkId || '42161', // Default to Avalanche
         save: options.save,
       }
     });
 
     // Prepare simulation payload
     const simulationPayload = {
-      network_id: options.networkId || '42161', // Arbitrum
+      network_id: options.networkId || '42161', // Avalanche
       block_number: options.blockNumber, // Use latest if undefined
       transaction_index: null,
       from: null,
@@ -88,8 +87,7 @@ export async function simulateBundleWithTenderly(
       if (typeof tx === 'string' && tx.startsWith('0x')) {
         return { raw_tx: tx };
       }
-      
-      // Otherwise parse it as an ethers transaction
+      // Otherwise parse it as an ethers transaction (mas seu código não faz parsing adicional)
       return { raw_tx: tx };
     }));
 
@@ -120,9 +118,9 @@ export async function simulateBundleWithTenderly(
     // Check if the simulation was successful
     if (response.status === 200 && response.data) {
       const simulationData = response.data;
-      const success = !simulationData.simulation.status || simulationData.simulation.status === false;
+      // Aqui seu código parecia ter uma inversão, success seria true quando status for true
+      const success = simulationData.simulation.status === true;
       
-      // Detailed logging based on simulation results
       if (success) {
         log.info("Tenderly simulation completed successfully", {
           category: "simulation",
@@ -132,11 +130,10 @@ export async function simulateBundleWithTenderly(
           callTrace: simulationData.transaction.call_trace ? "Available" : "Not available",
           txCount: transactions.length
         });
-        
-        // Extract important information from the simulation results
+
         let totalGasUsed = 0;
         let profitEstimate = 0;
-        
+
         if (simulationData.transaction && Array.isArray(simulationData.transaction.transaction_info)) {
           simulationData.transaction.transaction_info.forEach((txInfo: any) => {
             if (txInfo.gas_used) {
@@ -144,15 +141,14 @@ export async function simulateBundleWithTenderly(
             }
           });
         }
-        
-        // Log detailed profitability metrics if available
+
         log.debug("Simulation profit metrics", {
           category: "simulation_metrics",
           totalGasUsed,
           profitEstimate,
           simulationId: simulationData.simulation.id
         });
-        
+
         return {
           success: true,
           results: simulationData,
@@ -162,7 +158,7 @@ export async function simulateBundleWithTenderly(
       } else {
         // Handle failed simulation
         const errorMessage = simulationData.transaction?.error_message || 'Unknown error in simulation';
-        
+
         log.warn("Tenderly simulation failed", {
           category: "simulation",
           simulationId: simulationData.simulation?.id,
@@ -170,7 +166,7 @@ export async function simulateBundleWithTenderly(
           txCount: transactions.length,
           status: simulationData.simulation?.status
         });
-        
+
         return {
           success: false,
           error: errorMessage,
@@ -180,26 +176,24 @@ export async function simulateBundleWithTenderly(
       }
     }
 
-    // Handle unexpected response format
     log.error("Unexpected Tenderly API response", {
       category: "api_error",
       status: response.status,
       responseData: response.data ? "Available" : "Empty"
     });
-    
+
     return {
       success: false,
       error: `Unexpected API response: ${response.status}`,
     };
   } catch (error: any) {
-    // Handle API errors or network issues
     log.error(`Tenderly simulation error: ${error.message}`, {
       category: "exception",
       errorMessage: error.message,
       stack: error.stack,
       response: error.response?.data ? JSON.stringify(error.response.data).substring(0, 500) : "No response data"
     });
-    
+
     return {
       success: false,
       error: `Simulation error: ${error.message}`,
@@ -223,7 +217,7 @@ export async function estimateBundleProfitability(
   } = {}
 ): Promise<{
   profitable: boolean;
-  profitWei?: ethers.BigNumber;
+  profitWei?: ethers.BigNumberish;
   profitUsd?: number;
   gasUsed?: string;
   error?: string;
@@ -235,8 +229,7 @@ export async function estimateBundleProfitability(
       watchAddress,
       tokenAddress: options.tokenAddress || 'ETH'
     });
-    
-    // Run simulation with address tracking
+
     const simulation = await simulateBundleWithTenderly(
       transactions,
       {
@@ -245,71 +238,60 @@ export async function estimateBundleProfitability(
         description: "Profitability estimation"
       }
     );
-    
+
     if (!simulation.success) {
       return {
         profitable: false,
         error: simulation.error
       };
     }
-    
-    // Extract balance changes for the watched address
-    let balanceChange = ethers.BigNumber.from(0);
-    let gasUsed = ethers.BigNumber.from(0);
-    
-    // Process simulation results to find balance changes
-    // This is a simplified implementation - would need to be adapted to Tenderly's actual response format
+
+    let balanceChange = ethers.toBigInt(0);
+
     if (simulation.results && simulation.results.balance_changes) {
       const addressChanges = simulation.results.balance_changes[watchAddress.toLowerCase()];
       if (addressChanges) {
         if (options.tokenAddress) {
-          // For ERC20 tokens
+          // Para tokens ERC20
           const tokenChanges = addressChanges[options.tokenAddress.toLowerCase()];
           if (tokenChanges) {
-            balanceChange = ethers.BigNumber.from(tokenChanges);
+            balanceChange = ethers.toBigInt(tokenChanges);
           }
         } else {
-          // For ETH
-          balanceChange = ethers.BigNumber.from(addressChanges.eth || 0);
+          // Para ETH
+          balanceChange = ethers.toBigInt(addressChanges.eth || 0);
         }
       }
     }
-    
-    // Get gas used
-    if (simulation.gasUsed) {
-      gasUsed = ethers.BigNumber.from(simulation.gasUsed);
-    }
-    
-    // Calculate profitability
-    const gasPrice = ethers.utils.parseUnits("0.1", "gwei"); // Example gas price
-    const gasCost = gasUsed.mul(gasPrice);
-    
-    // Net profit = balance change - gas cost
-    const netProfit = balanceChange.sub(gasCost);
-    
-    // Convert to USD if ethPrice is provided
+
+    const gasUsed = simulation.gasUsed || "0";
+
+    // Aqui não descontamos o gasPrice, só o balanceChange é usado como lucro bruto
+    const netProfit = balanceChange;
+
+    const netProfitEth = ethers.formatEther(netProfit);
+
     let profitUsd;
     if (options.ethPrice) {
-      profitUsd = parseFloat(ethers.utils.formatEther(netProfit)) * options.ethPrice;
+      profitUsd = parseFloat(netProfitEth) * options.ethPrice;
     }
-    
-    const isProfitable = netProfit.gt(0);
-    
+
+    const isProfitable = netProfit > 0n;
+
     log.info("Bundle profitability estimate", {
       category: "profitability",
       profitable: isProfitable,
       profitWei: netProfit.toString(),
-      profitEth: ethers.utils.formatEther(netProfit),
+      profitEth: netProfitEth,
       profitUsd,
-      gasUsed: gasUsed.toString(),
-      gasCost: gasCost.toString()
+      gasUsed
     });
-    
+
     return {
       profitable: isProfitable,
       profitWei: netProfit,
       profitUsd,
-      gasUsed: gasUsed.toString()
+      gasUsed
     };
   } catch (error: any) {
     log.error(`Error estimating profitability: ${error.message}`, {
@@ -317,7 +299,7 @@ export async function estimateBundleProfitability(
       errorMessage: error.message,
       stack: error.stack
     });
-    
+
     return {
       profitable: false,
       error: `Estimation error: ${error.message}`

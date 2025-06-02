@@ -1,259 +1,201 @@
+import WebSocket from 'ws';
+// @ts-ignore
+global.WebSocket = WebSocket as any;
 
-import { ethers } from "ethers";
-import { getProvider } from "../../config/provider";
-import { buildOrchestrationFromRoute } from "./profiter2builder";
-import { fetchTopTokensArbitrum } from "../../utils/tokensdefi";
-import { findBestMultiHopRoute } from "./profiter2scanner";
-import { TokenInfo } from "../../utils/types";
-import { convertRouteToSwapSteps } from "../../utils/swapsteps";
-import { createClient } from "@supabase/supabase-js";
-import { executorAddress } from "../../../Arbitrum/constants/addresses";
+import { ethers, Wallet } from "ethers";
+import { buildDynamicOrchestration } from "./profiter2builder";
+import { mevWatcher } from "./profiter2scanner";
+import { TokenInfo, CallData } from "../../utils/types";
 import { buildUnwrapWETHCall } from "../../shared/build/UnwrapWETH";
-import {getWETHBalance} from "../../shared/build/BalanceOf"
-import {BigNumber, Wallet} from "ethers";
-import {buildSwapToETHCall} from "../../shared/build/buildSwapResidual";
+import { buildSwapToETHCall } from "../../shared/build/buildSwapResidual";
 import { simulateTokenProfit } from "../../simulation/simulate";
-import { sendBundle } from "../../../Arbitrum/executor/sendBundle";
+import { sendSignedTxL2 } from "../../executor/sendBundle";
 import * as dotenv from "dotenv";
 import * as path from "path";
+import { executoraddress, WETH } from "../../constants/addresses";
+import { enhancedLogger as log } from "../../utils/enhancedLogger";
+import { buildOrchestrateCall } from "../../shared/build/buildOrchestrate";
+import { alchemysupport, multiprovider, providersimplehttp } from "../../config/provider";
+import { encodePayMinerTx } from '../../shared/build/payMinerCall';
 
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
-// Initialize Supabase client for database interaction
-const supabaseUrl = process.env.SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-// Configuration with defaults and environment variables
 const MIN_PROFIT_ETH = parseFloat(process.env.MIN_PROFIT_ETH || "0.01");
+const DRY_RUN = process.env.DRY_RUN === "false";
+export const signer = new Wallet(process.env.PRIVATE_KEY!, alchemysupport);
 
-// Initialize provider and signer
-const provider = new ethers.providers.WebSocketProvider(process.env.ALCHEMY_WSS!);
-const signer = new Wallet(process.env.PRIVATE_KEY!, provider);
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const MAX_CONCURRENT_CYCLES = 3;
+let activeCycles = 0;
 
-// Bot state tracking
-let isRunning = false;
-let currentBaseToken: TokenInfo = {
-  address: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
-  symbol: "WETH",
-  decimals: 18,
-};
-let currentProfitThreshold = MIN_PROFIT_ETH;
+let consecutiveErrors = 0;
+let baseDelay = 1000;
+let maxDelay = 10000;
 
-// Function to check for bot configuration changes
-async function checkBotConfig() {
-  try {
-    // Fetch current bot configuration from database
-    const { data, error } = await supabase
-      .from('bot_statistics')
-      .select('is_running')
-      .eq('bot_type', 'arbitrage')
-      .single();
-      
-    if (error) {
-      console.error("❌ Error fetching bot configuration:", error.message);
-      return;
-    }
-    
-    // Update local running state based on database
-    if (data && isRunning !== data.is_running) {
-      if (data.is_running) {
-        console.log("🟢 Bot enabled from UI, starting operations...");
-        isRunning = true;
-      } else {
-        console.log("🔴 Bot disabled from UI, pausing operations...");
-        isRunning = false;
-      }
-      
-      // Log the state change
-      await supabase.from('bot_logs').insert({
-        level: isRunning ? 'info' : 'warn',
-        message: isRunning ? 'Bot started via UI control' : 'Bot stopped via UI control',
-        category: 'bot_state',
-        bot_type: 'arbitrage',
-        source: 'system'
-      });
-    }
-    
-    // Check for configuration changes (like base token or profit threshold)
-    // This could be extended based on what configuration options are available in the UI
-    
-  } catch (err: any) {
-    console.error("❌ Failed to check bot configuration:", err.message);
-  }
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function executeCycle() {
-  if (!isRunning) {
-    await sleep(1000);
-    return;
-  }
+function jitterDelay(attempt: number) {
+  const expBackoff = Math.min(baseDelay * 2 ** attempt, maxDelay);
+  return expBackoff / 2 + Math.random() * (expBackoff / 2);
+}
+
+async function executeOpportunity(opportunity: any) {
+  const cycleStart = Date.now();
+  log.info("🔍 Oportunidade de arbitragem recebida...");
 
   try {
-    console.log("🔍 Buscando tokens top 200 por volume na Arbitrum...");
-    const tokenList = await fetchTopTokensArbitrum(200);
+    const currentBaseToken: TokenInfo = {
+      address: WETH,
+      symbol: "WETH",
+      decimals: 18,
+    };
 
-    if (tokenList.length === 0) {
-      console.error("❌ Lista de tokens vazia, abortando.");
+    if (!opportunity || opportunity.route.length === 0) {
+      log.warn("❌ Oportunidade inválida ou rota vazia.");
       return;
     }
 
-    console.log(`✅ Tokens carregados: ${tokenList.length}. Rodando busca de arbitragem...`);
+    const profitInETH = parseFloat(ethers.formatUnits(opportunity.netProfit, currentBaseToken.decimals));
+    if (profitInETH < MIN_PROFIT_ETH) {
+      log.info(`⚠️ Lucro ${profitInETH} ETH abaixo do mínimo (${MIN_PROFIT_ETH}). Ignorando...`);
+      return;
+    }
 
-    const routeResult = await findBestMultiHopRoute({
-      provider,
-      baseToken: currentBaseToken,
-      tokenList,
+    const routeStr = opportunity.route.map((s: { tokenIn: TokenInfo; tokenOut: TokenInfo; dex: string; amountIn: bigint; amountOut: bigint; }) => s.tokenIn.symbol).join(" → ") + " → " + opportunity.route.at(-1)?.tokenOut.symbol;
+    log.info(`🚀 Rota: ${routeStr} | Lucro estimado: ${profitInETH} ETH`);
+
+    const flashLoanToken = currentBaseToken.address;
+    const flashLoanAmount = ethers.parseUnits("2", currentBaseToken.decimals);
+
+    const formattedRoute = opportunity.route.map((step: any) => ({
+      tokenIn: step.tokenIn.address,
+      tokenOut: step.tokenOut.address,
+      dex: step.dex,
+      amountIn: step.amountIn,
+      amountOut: step.amountOut,
+    }));
+
+    const orchestrationResult = await buildDynamicOrchestration({
+      route: formattedRoute,
+      flashLoanToken,
+      flashLoanAmount,
     });
 
-    if (!routeResult) {
-      console.log("❌ Nenhuma rota de arbitragem encontrada.");
+    if (!orchestrationResult) {
+      log.error("❌ Erro ao montar a orquestração.");
       return;
     }
 
-    const profitInETH = parseFloat(ethers.utils.formatUnits(routeResult.netProfit, currentBaseToken.decimals));
+    const profit = await simulateTokenProfit({
+      provider: multiprovider,
+      executoraddress: executoraddress,
+      tokenaddress: currentBaseToken.address,
+      orchestrationResult: orchestrationResult,
+    });
 
-    if (profitInETH < currentProfitThreshold) {
-      console.log(`⚠️ Lucro ${profitInETH} ETH abaixo do mínimo. Ignorando...`);
-      return;
-    }
+    const calls: CallData[] = [
+      ...orchestrationResult.approveCalls.map(call => ({
+        to: call.to,
+        data: call.data,
+        requiresApproval: true,
+        approvalToken: call.approvalToken,
+        approvalAmount: call.approvalAmount,
+      })),
+      ...orchestrationResult.swapCalls.map(call => ({
+        to: call.to,
+        data: call.data,
+        requiresApproval: true,
+        approvalToken: call.to,
+        approvalAmount: call.approvalAmount,
+      })),
+    ];
 
-    if (routeResult && routeResult.route.length > 0) {
-      try {
-        const routeStr =
-          routeResult.route.map((swap) => swap.tokenIn.symbol).join(" → ") +
-          " → " +
-          routeResult.route.at(-1)?.tokenOut.symbol;
-        
-        if (!routeResult?.route) throw new Error("Best route undefined");
+    const atomic = await buildOrchestrateCall({
+      token: flashLoanToken,
+      amount: flashLoanAmount,
+      calls,
+    });
 
-        const steps = await convertRouteToSwapSteps(routeResult.route, executorAddress);
+    const SwapRemainingTx = await buildSwapToETHCall({
+      tokenIn: flashLoanToken,
+      amountIn: profit,
+      recipient: executoraddress,
+    });
 
-        const startsWithBaseToken =
-          routeResult.route[0]?.tokenIn.address.toLowerCase() === currentBaseToken.address.toLowerCase();
+    const unwrapCall = buildUnwrapWETHCall({ wethaddress: WETH });
 
-        const orchestrationResult = await buildOrchestrationFromRoute({
-          route: steps,
-          executor: executorAddress,
-          altToken: currentBaseToken.address,
-          useAltToken: !startsWithBaseToken,
-        });
+    const minerTx = encodePayMinerTx(executoraddress, WETH, ethers.parseEther("0.002"));
 
-        if (!orchestrationResult) {
-          console.error("❌ Erro ao montar a orquestração.");
-          return;
-        }
+    const txs = [atomic, SwapRemainingTx, unwrapCall, minerTx];
 
-        const { calls, flashLoanToken } = orchestrationResult;
+    const bundleTxs = txs.map((tx) => ({
+      signer: signer,
+      transaction: {
+        to: tx.to,
+        data: tx.data,
+        gasLimit: 500_000,
+      },
+    }));
 
-        const profit = await simulateTokenProfit({
-          provider,
-          executorAddress,
-          tokenAddress: flashLoanToken,
-          calls,
-        });
-
-        const SwapRemainingtx = await buildSwapToETHCall({
-          tokenIn: flashLoanToken,
-          amountIn: profit,
-          recipient: executorAddress,
-        });
-
-        const wethBalanceRaw = await getWETHBalance({ provider });
-
-        let wethBalance: BigNumber;
-        try {
-          wethBalance = ethers.utils.parseEther(wethBalanceRaw);
-        } catch {
-          wethBalance = BigNumber.from(wethBalanceRaw);
-        }
-
-        const unwrapCall = buildUnwrapWETHCall({ amount: wethBalance });
-
-        const txs = [...(Array.isArray(calls) ? calls : [calls]), SwapRemainingtx, unwrapCall];
-
-        const bundleTxs = txs.map((tx) => ({
-          signer: signer,
-          transaction: {
-            to: tx.to,
-            data: tx.data,
-            gasLimit: 500_000,
-          },
-        }));
-
-        await sendBundle(bundleTxs, provider);
-      } catch (innerErr) {
-        console.error("❌ Erro na montagem/executação da rota:", innerErr);
-      }
-    }
-  } catch (err) {
-    console.error("❌ Erro durante ciclo:", err);
-  }
-}
-
-
-// Main bot loop
-async function loop() {
-  console.log("🤖 Iniciando bot de arbitragem...");
-  
-  // Initial configuration load
-  try {
-    const { data, error } = await supabase
-      .from('bot_statistics')
-      .select('is_running')
-      .eq('bot_type', 'arbitrage')
-      .single();
-      
-    if (data) {
-      isRunning = data.is_running || false;
-      console.log(`🤖 Estado inicial do bot: ${isRunning ? 'EXECUTANDO' : 'PARADO'}`);
-    } else {
-      // Initialize bot_statistics if it doesn't exist
-      await supabase.from('bot_statistics').upsert({
-        bot_type: 'arbitrage',
-        is_running: false,
-        total_profit: 0,
-        success_rate: 0,
-        average_profit: 0,
-        gas_spent: 0,
-        transactions_count: 0,
-        updated_at: new Date().toISOString()
+    if (DRY_RUN) {
+      log.warn("🧪 DRY-RUN ativado: bundle não será enviado");
+      bundleTxs.forEach((tx, i) => {
+        log.info(`  ${i + 1}. ${JSON.stringify(tx, null, 2)}`);
       });
+    } else {
+      await sendSignedTxL2({
+        providers: providersimplehttp,
+        bundleTxs: bundleTxs,
+        flashbotsEndpoint: process.env.FLASHBOTS!,
+        mevShareEndpoint: process.env.MEV_SHARE!,
+        signerKey: process.env.PRIVATE_KEY!,blocksRouteEndpoint:process.env.BLOXROUTE,
+        customHeaders: { Authorization: `Bearer ${process.env.BLOXROUTE_AUTH}` },
+      });
+      log.info("✅ Bundle enviado com sucesso!");
     }
-  } catch (err) {
-    console.error("❌ Error initializing bot state:", err);
-  }
-  
-  // Log bot startup
-  await supabase.from("bot_logs").insert({
-    level: "info",
-    message: `Bot iniciado com configuração: Profit min=${currentProfitThreshold} ETH, Base token=${currentBaseToken.symbol}`,
-    category: "bot_state",
-    bot_type: "arbitrage",
-    source: "system",
-    metadata: { 
-      profitThreshold: currentProfitThreshold,
-      baseToken: currentBaseToken.symbol,
-      isRunning
-    },
-  });
 
-  while (true) {
-    try {
-      // Check for configuration changes from UI
-      await checkBotConfig();
-      
-      // Run execution cycle if bot is enabled
-      if (isRunning) {
-        await executeCycle();
-      }
-    } catch (err) {
-      console.error("❌ Erro no loop principal:", err);
-    }
-    await sleep(1000); // Poll every second
+    consecutiveErrors = 0;
+  } catch (err) {
+    consecutiveErrors++;
+    log.error(`❌ Erro no ciclo: ${err}`);
+    const delay = jitterDelay(consecutiveErrors);
+    log.warn(`⏳ Aguardando ${delay}ms antes do próximo ciclo (erro consecutivo: ${consecutiveErrors})`);
+    await sleep(delay);
+  } finally {
+    const cycleEnd = Date.now();
+    const duration = ((cycleEnd - cycleStart) / 1000).toFixed(2);
+    log.info(`⏱️ Oportunidade processada em ${duration}s`);
+    activeCycles--;
   }
 }
 
-// Start the bot
-loop();
+function startListening() {
+  mevWatcher.on("opportunity", async (opportunity) => {
+    if (activeCycles >= MAX_CONCURRENT_CYCLES) {
+      log.warn("⚠️ Limite de ciclos simultâneos atingido. Ignorando oportunidade.");
+      return;
+    }
+    activeCycles++;
+    await executeOpportunity(opportunity);
+  });
+}
+
+process.on("uncaughtException", (err) => {
+  if (err instanceof Error) {
+    log.error("🔥 Erro fatal não tratado:", { message: err.message, stack: err.stack });
+  } else {
+    log.error("🔥 Erro fatal não tratado:", { error: String(err) });
+  }
+});
+
+process.on("unhandledRejection", (reason) => {
+  if (reason instanceof Error) {
+    log.error("🔥 Promessa rejeitada não tratada:", { message: reason.message, stack: reason.stack });
+  } else {
+    log.error("🔥 Promessa rejeitada não tratada:", { error: String(reason) });
+  }
+});
+
+log.info("🤖 Iniciando bot de arbitragem com controle de concorrência baseado em oportunidades...");
+startListening();

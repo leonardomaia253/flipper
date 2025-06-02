@@ -1,12 +1,7 @@
 
-import { createClient } from "@supabase/supabase-js";
 import { ethers } from "ethers";
 import { enhancedLogger } from "./enhancedLogger";
 
-// Initialize Supabase client for database interaction
-const supabaseUrl = process.env.SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Categorized error types
 export enum ErrorCategory {
@@ -296,25 +291,8 @@ export class CircuitBreaker {
       
 
         
-        // Log to database
-        try {
-          await supabase.from("bot_logs").insert({
-            level: "warn",
-            message: `Circuit breaker opened for ${operationName}`,
-            category: "circuit_breaker",
-            bot_type: this.botType,
-            source: "error_handler",
-            metadata: {
-              failures: this.failures,
-              maxFailures: this.maxFailures,
-              resetTimeout: this.resetTimeout
-            }
-          });
-        } catch (logError) {
-          console.error("Failed to log circuit breaker state to database:", logError);
-        }
-      }
-      
+        // Log to dat
+    }
       // Re-throw the error
       throw Error;
     }

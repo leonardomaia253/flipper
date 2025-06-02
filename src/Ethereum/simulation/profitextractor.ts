@@ -1,4 +1,4 @@
-import { BigNumber, ethers } from "ethers";
+import { BigNumberish, ethers } from "ethers";
 
 type TokenTransfer = {
   from: string;
@@ -21,31 +21,33 @@ type SimulationResult = {
 };
 
 function addToMap(
-  map: Record<string, BigNumber>,
+  map: Record<string, bigint>,
   token: string,
-  amount: BigNumber
+  amount: bigint
 ) {
   if (!map[token]) {
-    map[token] = BigNumber.from(0);
+    map[token] = 0n;
   }
-  map[token] = map[token].add(amount);
+  map[token] = map[token]! + amount;
 }
 
 export function extractProfit(
-  transfers: any[],
+  transfers: TokenTransfer[],
   contractAddress: string,
   bribeRecipientAddresses: string[] = []
-): Record<string, BigNumber> {
+): Record<string, bigint> {
   const address = contractAddress.toLowerCase();
-  const bribeRecipients = new Set(bribeRecipientAddresses.map(a => a.toLowerCase()));
+  const bribeRecipients = new Set(
+    bribeRecipientAddresses.map((a) => a.toLowerCase())
+  );
 
-  const netProfit: Record<string, BigNumber> = {};
+  const netProfit: Record<string, bigint> = {};
 
   for (const transfer of transfers) {
     const token = transfer.token_address.toLowerCase();
     const from = transfer.from.toLowerCase();
     const to = transfer.to.toLowerCase();
-    const value = BigNumber.from(transfer.value);
+    const value = ethers.toBigInt(transfer.raw_amount);
 
     // 1. Valor recebido pelo contrato executor → conta como lucro
     if (to === address) {
@@ -56,14 +58,14 @@ export function extractProfit(
     if (from === address) {
       // Se foi um bribe (pagamento ao minerador), ignoramos
       if (!bribeRecipients.has(to)) {
-        addToMap(netProfit, token, value.mul(-1));
+        addToMap(netProfit, token, -value);
       }
     }
   }
 
   // Remove tokens com lucro zero ou negativo
   for (const [token, amount] of Object.entries(netProfit)) {
-    if (amount.lte(0)) {
+    if (amount <= 0n) {
       delete netProfit[token];
     }
   }

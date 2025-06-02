@@ -1,7 +1,7 @@
 import { ethers } from "ethers";
 import fetch from "node-fetch";
 
-// ABI mínima do Chainlink Aggregator
+// ABI padrão do AggregatorV3Interface da Chainlink
 const aggregatorV3InterfaceABI = [
   {
     inputs: [],
@@ -25,79 +25,110 @@ const aggregatorV3InterfaceABI = [
   },
 ];
 
-async function getLatestPrice(feedAddress: string, provider: ethers.providers.Provider): Promise<{
-  price: ethers.BigNumber;
-  decimals: number;
-}> {
-  const feed = new ethers.Contract(feedAddress, aggregatorV3InterfaceABI, provider);
-  const [roundData, decimals] = await Promise.all([
-    feed.latestRoundData(),
-    feed.decimals(),
-  ]);
-  const answer = roundData.answer;
-  if (answer.lte(0)) throw new Error("Invalid price from feed");
-  return {
-    price: ethers.BigNumber.from(answer.toString()),
-    decimals,
+// Tipagem para CoinGecko
+type CoinGeckoPriceResponse = {
+  [tokenId: string]: {
+    eth?: number;
   };
+};
+
+// Mapear feeds Chainlink por token e rede
+const chainlinkFeeds: Record<string, Record<string, string>> = {
+  arbitrum: {
+    USDC: "0x....", // Exemplo: USDC/ETH feed na Arbitrum
+    DAI: "0x....",
+  },
+  ethereum: {
+    USDC: "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6", // Exemplo real: USDC/ETH feed Ethereum
+    DAI: "0xAed0c38402a5d19df6E4c03F4E2DceD6e29c1ee9",
+  },
+  // Adicione outras redes e tokens conforme necessário
+};
+
+/**
+ * Obtém endereço do feed Chainlink para o token e rede.
+ */
+function getChainlinkFeedAddress(tokenSymbol: string, network: string): string | null {
+  const lowerSymbol = tokenSymbol.toUpperCase();
+  return chainlinkFeeds[network]?.[lowerSymbol] || null;
 }
 
 /**
- * Retorna o preço do token em ETH usando Chainlink de forma dinâmica
+ * Busca preço Chainlink: token -> ETH
+ */
+async function getTokenPriceInEthChainlink(
+  feedAddress: string,
+  provider: ethers.JsonRpcProvider
+): Promise<bigint> {
+  const feed = new ethers.Contract(feedAddress, aggregatorV3InterfaceABI, provider);
+
+  const [roundData, decimals] = await Promise.all([feed.latestRoundData(), feed.decimals()]);
+  const answer = BigInt(roundData.answer.toString());
+
+  if (answer <= 0n) throw new Error("Invalid price from Chainlink feed");
+
+  // Ajusta para 18 decimais padrão
+  const price = answer * 10n ** (18n - BigInt(decimals));
+
+  return price;
+}
+
+/**
+ * Fallback: busca preço na CoinGecko
+ */
+async function getPriceFromCoinGecko(tokenSymbol: string): Promise<bigint> {
+  try {
+    const tokenId = tokenSymbol.toLowerCase();
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${tokenId}&vs_currencies=eth`;
+
+    const response = await fetch(url);
+    const data = (await response.json()) as CoinGeckoPriceResponse;
+
+    const ethPrice = data[tokenId]?.eth;
+    if (ethPrice === undefined) {
+      console.warn(`CoinGecko: preço para ${tokenSymbol} não encontrado.`);
+      return 0n;
+    }
+
+    // Converte float → bigint com 18 decimais
+    const priceBigInt = BigInt(Math.floor(ethPrice * 1e18));
+    return priceBigInt;
+  } catch (err) {
+    console.error(`Erro ao buscar preço na CoinGecko para ${tokenSymbol}:`, err);
+    return 0n;
+  }
+}
+
+/**
+ * Obtém preço do token em ETH, preferencialmente via Chainlink, com fallback para CoinGecko.
  */
 export async function getTokenPriceInEthDynamic({
   tokenSymbol,
   provider,
-  network = "arbitrum",
+  network = "base",
 }: {
   tokenSymbol: string;
-  provider: ethers.providers.Provider;
+  provider: ethers.JsonRpcProvider;
   network?: string;
-}): Promise<ethers.BigNumber> {
-  const token = tokenSymbol.toLowerCase();
+}): Promise<bigint> {
+  const feedAddress = getChainlinkFeedAddress(tokenSymbol, network);
 
-  try {
-    // Busca feeds da Chainlink
-    const res = await fetch(`https://data.chain.link/${network}/mainnet/price-feeds`);
-    const feeds: {
-      address: string;
-      base: string;
-      quote: string;
-    }[] = await res.json();
-
-    let tokenEthFeed: string | undefined;
-    let tokenUsdFeed: string | undefined;
-    let ethUsdFeed: string | undefined;
-
-    for (const feed of feeds) {
-      const base = feed.base.toLowerCase();
-      const quote = feed.quote.toLowerCase();
-
-      if (base === token && quote === "eth") tokenEthFeed = feed.address;
-      if (base === token && quote === "usd") tokenUsdFeed = feed.address;
-      if (base === "eth" && quote === "usd") ethUsdFeed = feed.address;
+  if (feedAddress) {
+    try {
+      const price = await getTokenPriceInEthChainlink(feedAddress, provider);
+      if (price > 0n) {
+        console.log(`Preço Chainlink de ${tokenSymbol}: ${price.toString()} wei`);
+        return price;
+      }
+    } catch (err) {
+      console.warn(`Erro Chainlink para ${tokenSymbol}: ${err}. Usando CoinGecko...`);
     }
-
-    if (tokenEthFeed) {
-      const { price, decimals } = await getLatestPrice(tokenEthFeed, provider);
-      return price.mul(ethers.BigNumber.from(10).pow(18 - decimals));
-    }
-
-    if (tokenUsdFeed && ethUsdFeed) {
-      const tokenUsd = await getLatestPrice(tokenUsdFeed, provider);
-      const ethUsd = await getLatestPrice(ethUsdFeed, provider);
-
-      const tokenUsdAdj = tokenUsd.price.mul(ethers.BigNumber.from(10).pow(18 - tokenUsd.decimals));
-      const ethUsdAdj = ethUsd.price.mul(ethers.BigNumber.from(10).pow(18 - ethUsd.decimals));
-
-      const priceInEth = tokenUsdAdj.mul(ethers.BigNumber.from(10).pow(18)).div(ethUsdAdj);
-      return priceInEth;
-    }
-
-    console.warn(`Feeds insuficientes para calcular preço em ETH para ${tokenSymbol}`);
-    return ethers.BigNumber.from(0);
-  } catch (err) {
-    console.error(`Erro ao obter preço em ETH para ${tokenSymbol}:`, err);
-    return ethers.BigNumber.from(0);
+  } else {
+    console.warn(`Sem feed Chainlink configurado para ${tokenSymbol} na rede ${network}.`);
   }
+
+  // Fallback: CoinGecko
+  const priceCoingecko = await getPriceFromCoinGecko(tokenSymbol);
+  console.log(`Preço CoinGecko de ${tokenSymbol}: ${priceCoingecko.toString()} wei`);
+  return priceCoingecko;
 }

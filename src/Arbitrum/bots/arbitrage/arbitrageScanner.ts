@@ -1,265 +1,339 @@
-import { ethers, BigNumber } from "ethers";
-import pLimit from "p-limit";
-import { DexType, QuoteResult, TokenInfo } from "../../utils/types";
-import { getGasCostInToken, estimateGasUsage } from "../../utils/gasEstimator";
-import { estimateSwapOutput } from "../../utils/estimateOutput";
+import { ethers, BigNumberish } from "ethers";
+import axios from "axios";
+import { camelotQuoter, pancakeswapv3Quoter, ramsesv2Quoter,sushiswapv2Router, sushiswapv3Quoter, uniswapv2Router, uniswapv3Quoter2 } from "../../constants/addresses";
+import {alchemysupport, infurasupport } from "../../config/provider"; 
+import { EventEmitter } from "events";
+import { DexType } from "../../utils/types";
 
-export type EstimateSwapOutputResult = {
-  output: BigNumber;
-  paths: string[];
-  dex: DexType;
-};
+export const mevWatcher = new EventEmitter();
+const MIN_LIQUIDITY = ethers.parseEther("100"); // bigint
+const MIN_PROFIT_PERCENT = 1; 
+const MAX_DEPTH = 4;
+const SLIPPAGE_TOLERANCE = 0.005; // 0.5%
+const GAS_PRICE_GWEI = 100;
+const GAS_LIMIT_PER_SWAP = 150_000;
 
-const DEX_LIST_PRIORITY: DexType[] = [
-  "uniswapv3",
-  "uniswapv2",
-  "uniswapv4",
-  "sushiswapv3",
-  "sushiswapv2",
-  "camelot",
-  "maverickv2",
-  "ramsesv2",
-  "pancakeswapv3",
-  "curve",
+const IUniswapV2RouterABI = [
+  "function getAmountsOut(uint256 amountIn, address[] path) external view returns (uint256[] amounts)",
+];
+const IUniswapV3QuoterABI = [
+  "function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) external view returns (uint256 amountOut)",
 ];
 
-const MIN_PROFIT_THRESHOLD = 0.01; // em unidades do token base
+const uniswapv2 = new ethers.Contract(uniswapv2Router, IUniswapV2RouterABI, alchemysupport);
+const uniswapv3 = new ethers.Contract(uniswapv3Quoter2, IUniswapV3QuoterABI, infurasupport);
+const sushiswapv2 = new ethers.Contract(sushiswapv2Router, IUniswapV2RouterABI, alchemysupport);
+const sushiswapv3 = new ethers.Contract(sushiswapv3Quoter, IUniswapV3QuoterABI, infurasupport);
+const pancakeswapv3 = new ethers.Contract(pancakeswapv3Quoter, IUniswapV3QuoterABI, alchemysupport);
+const ramsesv2 = new ethers.Contract(ramsesv2Quoter, IUniswapV2RouterABI, infurasupport);
+const camelot = new ethers.Contract(camelotQuoter, IUniswapV2RouterABI, alchemysupport);
 
-// Permite ajustar o batchSize externamente (default 20)
-const DEFAULT_BATCH_SIZE = 20;
-const MAX_CONCURRENT_CALLS = 10;
 
-async function getQuoteFromDex(
-  fromToken: string,
-  toToken: string,
-  amountIn: BigNumber,
-  dex: DexType,
-  quoteCache: Map<string, EstimateSwapOutputResult>
-): Promise<EstimateSwapOutputResult | null> {
-  const cacheKey = `${fromToken}-${toToken}-${amountIn.toString()}-${dex}`;
-  if (quoteCache.has(cacheKey)) {
-    return quoteCache.get(cacheKey)!;
-  }
+type Protocol = "uniswapv2" | "uniswapv3" | "sushiswapv2" | "sushiswapv3"| "pancakeswapv3" | "ramsesv2" | "camelot";
 
-  try {
-    const output = await estimateSwapOutput(fromToken, toToken, amountIn, dex);
-    if (output.isZero()) return null;
-
-    const result = {
-      output,
-      paths: [fromToken, toToken],
-      dex,
-    };
-    quoteCache.set(cacheKey, result);
-    return result;
-  } catch {
-    return null;
-  }
-}
-
-async function getBestQuoteAcrossDEXs(params: {
+interface Pool {
+  address: string;
   tokenIn: string;
   tokenOut: string;
-  amountIn: BigNumber;
-  quoteCache: Map<string, EstimateSwapOutputResult>;
-}): Promise<EstimateSwapOutputResult | null> {
-  const limit = pLimit(MAX_CONCURRENT_CALLS);
-
-  const quotePromises = DEX_LIST_PRIORITY.map((dex) =>
-    limit(() => getQuoteFromDex(params.tokenIn, params.tokenOut, params.amountIn, dex, params.quoteCache))
-  );
-
-  const quotes = await Promise.all(quotePromises);
-  const validQuotes = quotes.filter((q): q is EstimateSwapOutputResult => q !== null);
-
-  if (validQuotes.length === 0) return null;
-
-  // Retorna o melhor quote
-  return validQuotes.reduce((best, current) =>
-    current.output.gt(best.output) ? current : best
-  );
+  protocol: Protocol;
+  fee?: number;
+  liquidity: bigint;
 }
 
-/**
- * Slippage adaptativa baseada em liquidez simples:
- * Quanto maior a liquidez, menor a slippage aplicada.
- * Retorna percentual decimal (ex: 0.005 para 0.5%)
- */
+interface SwapStep {
+  pool: Pool;
+  amountIn: bigint;
+  amountOut: bigint;
+}
 
-export async function findBestArbitrageRoute({
-  provider,
-  baseToken,
-  tokenList,
-  amountInRaw = "1",
-  batchSize = DEFAULT_BATCH_SIZE,
-  enableDebugLog = false,
-}: {
-  provider: ethers.providers.Provider;
-  baseToken: TokenInfo;
-  tokenList: TokenInfo[];
-  amountInRaw?: string;
-  batchSize?: number;
-  enableDebugLog?: boolean;
-}) {
-  const amountIn = ethers.utils.parseUnits(amountInRaw, baseToken.decimals);
+interface RouteResult {
+  swaps: SwapStep[];
+  profitPercent: number;
+  profitAbsolute: bigint;
+}
 
-  let bestRoute: {
-    route: {
-      tokenIn: TokenInfo;
-      tokenOut: TokenInfo;
-      dex: DexType;
-      amountIn: ethers.BigNumber;
-      amountOut: ethers.BigNumber;
-    }[];
-    quote: QuoteResult;
-    gasCost: bigint;
-    netProfit: bigint;
-    inputAmount: ethers.BigNumber;
-  } | null = null;
+interface TokenInfo {
+  address: string;
+  symbol: string;
+  decimals: number;
+}
 
-  let maxNetProfit = ethers.BigNumber.from(0);
-  const quoteCache = new Map<string, EstimateSwapOutputResult>();
+interface QuoteResult {
+  profitPercent: number;
+  profitAbsolute: bigint;
+}
 
-  for (let i = 0; i < tokenList.length; i += batchSize) {
-    const batch = tokenList.slice(i, i + batchSize);
+interface FormattedRouteResult {
+  route: Array<{
+    tokenIn: TokenInfo;
+    tokenOut: TokenInfo;
+    dex: DexType;
+    amountIn: bigint;
+    amountOut: bigint;
+  }>;
+  quote: QuoteResult;
+  gasCost: bigint;
+  netProfit: bigint;
+  inputAmount: bigint;
+}
 
-    const batchResults = await Promise.all(
-      batch.map(async (intermediate) => {
-        try {
-          if (intermediate.address === baseToken.address) return null;
+async function simulateSwapReal(pool: Pool, amountIn: bigint): Promise<bigint> {
+  try {
+    if (pool.protocol === "uniswapv2") {
+      const amounts: bigint[] = await uniswapv2.getAmountsOut(amountIn, [pool.tokenIn, pool.tokenOut]);
+      return amounts[1] ?? 0n;
+    }
+    if (pool.protocol === "sushiswapv2") {
+      const amounts: bigint[] = await sushiswapv2.getAmountsOut(amountIn, [pool.tokenIn, pool.tokenOut]);
+      return amounts[1] ?? 0n;
+    }
+    if (pool.protocol === "ramsesv2") {
+      const amounts: bigint[] = await ramsesv2.getAmountsOut(amountIn, [pool.tokenIn, pool.tokenOut]);
+      return amounts[1] ?? 0n;
+    }
+    if (pool.protocol === "camelot") {
+      const amounts: bigint[] = await camelot.getAmountsOut(amountIn, [pool.tokenIn, pool.tokenOut]);
+      return amounts[1] ?? 0n;
+    }
+    if (pool.protocol === "uniswapv3") {
+      const fee = pool.fee ?? 3000;
+      // callStatic para garantir retorno, método acessado via string para evitar erro TS
+      const amountOut: bigint = await uniswapv3.quoteExactInputSingle(
+        pool.tokenIn,
+        pool.tokenOut,
+        fee,
+        amountIn,
+        0n
+      );
+      return amountOut ?? 0n;
+    }
+    if (pool.protocol === "sushiswapv3") {
+      const fee = pool.fee ?? 3000;
+      const amountOut: bigint = await sushiswapv3.quoteExactInputSingle(
+        pool.tokenIn,
+        pool.tokenOut,
+        fee,
+        amountIn,
+        0n
+      );
+      return amountOut ?? 0n;
+    }
+     if (pool.protocol === "pancakeswapv3") {
+      const fee = pool.fee ?? 3000;
+      const amountOut: bigint = await pancakeswapv3.quoteExactInputSingle(
+        pool.tokenIn,
+        pool.tokenOut,
+        fee,
+        amountIn,
+        0n
+      );
+      return amountOut ?? 0n;
+    }
+    return 0n; // fallback para protocolos desconhecidos
+  } catch {
+    return 0n;
+  }
+}
 
-          // Obtem o melhor quote para base -> intermediate
-          const firstHopQuote = await getBestQuoteAcrossDEXs({
-            tokenIn: baseToken.address,
-            tokenOut: intermediate.address,
-            amountIn,
-            quoteCache,
-          });
+async function fetchPoolsFromTheGraph(protocol: Protocol, retries = 3, apiKey?: string): Promise<Pool[]> {
+  let url = "";
+  let query = "";
 
-          if (!firstHopQuote) return null;
+  switch (protocol) {
+    case "uniswapv2":
+      url = "https://gateway.thegraph.com/api/subgraphs/id/CStW6CSQbHoXsgKuVCrk3uShGA4JX3CAzzv2x9zaGf8w";
+      break;
+    case "sushiswapv2":
+      url = "https://gateway.thegraph.com/api/subgraphs/id/8yBXBTMfdhsoE5QCf7KnoPmQb7QAWtRzESfYjiCjGEM9";
+      break;
+    case "camelot":
+      url = "https://gateway.thegraph.com/api/subgraphs/id/3utanEBA9nqMjPnuQP1vMCCys6enSM3EawBpKTVwnUw2";
+      break;
+    case "ramsesv2":
+      url = "https://gateway.thegraph.com/api/subgraphs/id/ATQTt3wRTgXy4canCh6t1yeczAz4ZuEkFQL2mrLXEMyQ";
+      break;
+    case "uniswapv3":
+      url = "https://gateway.thegraph.com/api/subgraphs/id/FbCGRftH4a3yZugY7TnbYgPJVEv2LvMT6oF1fxPe9aJM";
+      break;
+    case "pancakeswapv3":
+      url = "https://gateway.thegraph.com/api/subgraphs/id/251MHFNN1rwjErXD2efWMpNS73SANZN8Ua192zw6iXve";
+      break;
+    case "sushiswapv3":
+      url = "https://gateway.thegraph.com/api/subgraphs/id/96EYD64NqmnFxMELu2QLWB95gqCmA9N96ssYsZfFiYHg";
+      break;
+  }
 
-          // Slippage adaptativa para segundo hop
-          const slippageSecondHop = 50;
-
-          // Ajusta o amountIn do segundo hop considerando slippage da primeira perna
-          const amountInSecondHop = firstHopQuote.output
-            .mul(10000 - Math.floor(slippageSecondHop * 10000))
-            .div(10000);
-
-          // Obtem o melhor quote para intermediate -> base (usando amountIn aproximado)
-          const secondHopQuote = await getBestQuoteAcrossDEXs({
-            tokenIn: intermediate.address,
-            tokenOut: baseToken.address,
-            amountIn: amountInSecondHop,
-            quoteCache,
-          });
-
-          if (!secondHopQuote) return null;
-
-          const finalAmountOut = secondHopQuote.output;
-          if (finalAmountOut.lte(amountIn)) return null;
-
-          const profit = finalAmountOut.sub(amountIn);
-
-          // Evita estimar gas se lucro bruto for pequeno
-          if (
-            profit.lte(
-              ethers.utils.parseUnits(MIN_PROFIT_THRESHOLD.toString(), baseToken.decimals)
-            )
-          )
-            return null;
-
-          // Estima gas e custo
-          const gasEstimate = await estimateGasUsage([
-            baseToken.address,
-            intermediate.address,
-            baseToken.address,
-          ]);
-
-          const gasCost = await getGasCostInToken({
-            provider,
-            token: baseToken,
-            gasUnits: gasEstimate,
-          });
-
-          const netProfit = profit.sub(gasCost);
-
-          if (enableDebugLog) {
-            const netProfitReadable = ethers.utils.formatUnits(netProfit, baseToken.decimals);
-            const grossProfitReadable = ethers.utils.formatUnits(profit, baseToken.decimals);
-            console.debug(
-              `[${baseToken.symbol}→${intermediate.symbol}→${baseToken.symbol}] | ${firstHopQuote.dex}→${secondHopQuote.dex} | Gross: ${grossProfitReadable} | Net: ${netProfitReadable}`
-            );
-          }
-
-          if (
-            netProfit.gt(maxNetProfit) &&
-            netProfit.gt(
-              ethers.utils.parseUnits(MIN_PROFIT_THRESHOLD.toString(), baseToken.decimals)
-            )
-          ) {
-            // Slippage adaptada para saída final
-            const slippageFinal =50;
-            const amountOutMin = finalAmountOut
-              .mul(10000 - Math.floor(slippageFinal * 10000))
-              .div(10000);
-
-            const route = [
-              {
-                tokenIn: baseToken,
-                tokenOut: intermediate,
-                dex: firstHopQuote.dex,
-                amountIn,
-                amountOut: firstHopQuote.output,
-              },
-              {
-                tokenIn: intermediate,
-                tokenOut: baseToken,
-                dex: secondHopQuote.dex,
-                amountIn: firstHopQuote.output,
-                amountOut: finalAmountOut,
-              },
-            ];
-
-            const combinedQuote: QuoteResult = {
-              amountIn: BigInt(amountIn.toString()),
-              amountOut: BigInt(finalAmountOut.toString()),
-              amountOutMin: BigInt(amountOutMin.toString()),
-              estimatedGas: gasEstimate,
-              path: [baseToken, intermediate, baseToken],
-              dex: `${firstHopQuote.dex}→${secondHopQuote.dex}`,
-            };
-
-            return {
-              route,
-              quote: combinedQuote,
-              gasCost: BigInt(gasCost.toString()),
-              netProfit: BigInt(netProfit.toString()),
-              inputAmount: amountIn,
-            };
-          }
-
-          return null;
-        } catch (e) {
-          if (enableDebugLog) {
-            console.warn(`Erro ao processar token ${intermediate.symbol}:`, e);
-          }
-          return null;
-        }
-      })
-    );
-
-    for (const candidate of batchResults) {
-      if (candidate && ethers.BigNumber.from(candidate.netProfit.toString()).gt(maxNetProfit)) {
-        maxNetProfit = ethers.BigNumber.from(candidate.netProfit.toString());
-        bestRoute = candidate;
+  if (["uniswapv2", "sushiswapv2", "ramsesv2", "camelot"].includes(protocol)) {
+  query = `
+    {
+      pairs(first: 1000, orderBy: reserveUSD, orderDirection: desc) {
+        id
+        token0 { id }
+        token1 { id }
+        reserveUSD
       }
+    }
+  `;
+} else {
+  query = `
+    {
+      pools(first: 1000, orderBy: totalValueLockedUSD, orderDirection: desc) {
+        id
+        token0 { id }
+        token1 { id }
+        feeTier
+        liquidity
+        totalValueLockedUSD
+      }
+    }
+  `;
+}
+   const headers: Record<string, string> = { "Content-Type": "application/json" };
+   if (apiKey) {
+     headers["Authorization"] = `Bearer ${apiKey}`;
+   }
+ 
+   try {
+     const res = await axios.post(url, { query }, { headers });
+     const data = res.data.data;
+     const items = ["uniswapv2", "sushiswapv2", "ramsesv2", "camelot"].includes(protocol) ? data.pairs : data.pools;
+ 
+     return items.map((p: any) => ({
+       address: p.id,
+       tokenIn: p.token0.id,
+       tokenOut: p.token1.id,
+       protocol,
+       liquidity: ethers.parseUnits(p.totalValueLockedUSD ?? p.reserveUSD ?? "0", 18),
+       fee: p.feeTier ? Number(p.feeTier) : undefined,
+     }));
+   } catch (e) {
+     if (retries > 0) {
+       await new Promise((r) => setTimeout(r, 1000));
+       return fetchPoolsFromTheGraph(protocol, retries - 1, apiKey);
+     }
+     console.error(`Erro fetchPoolsFromTheGraph (${protocol}):`, e);
+     return [];
+   }
+}
+
+function estimateGasCostInETH(numSwaps: number, gasPriceGwei: number): bigint {
+  const gasLimit = GAS_LIMIT_PER_SWAP * numSwaps;
+  const gasPrice = ethers.parseUnits(gasPriceGwei.toString(), "gwei");
+  return gasPrice * BigInt(gasLimit);
+}
+
+function applySlippage(amount: bigint, slippagePercent: number): bigint {
+  // (amount * (1 - slippagePercent))
+  const factor = BigInt(Math.floor((1 - slippagePercent) * 1e6));
+  return (amount * factor) / 1_000_000n;
+}
+
+export async function findProfitableRoutes(pools: Pool[], startToken: string, initialAmountIn: bigint): Promise<RouteResult[]> {
+  const results: RouteResult[] = [];
+  const visited = new Set<string>();
+
+  async function dfs(currentToken: string, amountIn: bigint, path: SwapStep[], depth: number) {
+    if (depth > MAX_DEPTH) return;
+
+    for (const pool of pools) {
+      if (pool.tokenIn !== currentToken) continue;
+      if (pool.liquidity < MIN_LIQUIDITY) continue;
+
+      const key = `${pool.address}-${amountIn.toString()}`;
+      if (visited.has(key)) continue;
+      visited.add(key);
+
+      const amountOutRaw = await simulateSwapReal(pool, amountIn);
+      if (amountOutRaw <= 0n) continue;
+
+      const amountOut = applySlippage(amountOutRaw, SLIPPAGE_TOLERANCE);
+      if (amountOut <= 0n) continue;
+
+      const estimatedGasCost = estimateGasCostInETH(path.length + 1, GAS_PRICE_GWEI);
+      let profitPercent = 0;
+      let profitAbsolute = 0n;
+
+      const newPath = [...path, { pool, amountIn, amountOut }];
+
+      if (pool.tokenOut === startToken && depth >= 1) {
+        profitAbsolute = amountOut - initialAmountIn - estimatedGasCost;
+        profitPercent = Number((profitAbsolute * 10000n) / initialAmountIn) / 100;
+
+        if (profitPercent >= MIN_PROFIT_PERCENT && profitAbsolute > 0n) {
+          results.push({ swaps: newPath, profitPercent, profitAbsolute });
+        }
+      }
+
+      await dfs(pool.tokenOut, amountOut, newPath, depth + 1);
     }
   }
 
-  if (!bestRoute) {
-    throw new Error("Nenhuma rota de arbitragem encontrada.");
-  }
+  await dfs(startToken, initialAmountIn, [], 0);
+  return results;
+}
 
-  return bestRoute;
+function detectHighlyConnectedTokens(pools: Pool[]): string[] {
+  const tokenConnections: Record<string, number> = {};
+  for (const pool of pools) {
+    tokenConnections[pool.tokenIn] = (tokenConnections[pool.tokenIn] ?? 0) + 1;
+    tokenConnections[pool.tokenOut] = (tokenConnections[pool.tokenOut] ?? 0) + 1;
+  }
+  return Object.entries(tokenConnections)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([token]) => token);
+}
+
+export async function watcher() {
+  console.log("Iniciando watcher MEV autônomo...");
+  const apiKey = "eyJhbGciOiJLTVNFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3ODQ4NzA0NzAsImp0aSI6ImQxZmI0M2M3LTZhNzItNGI5MC1iZTQ0LWIxMGQ2MWQ3ODMxZSIsImlhdCI6MTc0ODg3MDQ3MCwiaXNzIjoiZGZ1c2UuaW8iLCJzdWIiOiIwbmVqZTY0Yzc1YzdiNjZkNDk5OGUiLCJ2IjoxLCJha2kiOiIyZmJmMjFhNmI3ZTQ5NGI5MzU0NDU0MzdiNzEwZmE0Mjk5Nzk5M2JkYTllNjNlZGUwMGRjNzU3YjQ3MjhmYjNkIiwidWlkIjoiMG5lamU2NGM3NWM3YjY2ZDQ5OThlIn0.cYomtXG5TnG-Udn1RTqJkJYOFF25GYMg4qI1RxBM6EiSahslaMvaKs5qPo0_VAMkwJ5zMMHLid2gSJr8lezxKw"
+  while (true) {
+    const allPools = [
+      ...(await fetchPoolsFromTheGraph("uniswapv2", 3, apiKey)),
+      ...(await fetchPoolsFromTheGraph("sushiswapv2", 3, apiKey)),
+      ...(await fetchPoolsFromTheGraph("ramsesv2", 3, apiKey)),
+      ...(await fetchPoolsFromTheGraph("camelot", 3, apiKey)),
+      ...(await fetchPoolsFromTheGraph("uniswapv3", 3, apiKey)),
+      ...(await fetchPoolsFromTheGraph("pancakeswapv3", 3, apiKey)),
+      ...(await fetchPoolsFromTheGraph("sushiswapv3", 3, apiKey)),
+    ];
+
+    const pools = allPools;
+
+    const baseTokens = detectHighlyConnectedTokens(pools);
+    console.log("Tokens base detectados:", baseTokens);
+
+    for (const token of baseTokens) {
+      const initialAmountIn = ethers.parseEther("1");
+
+      const profitableRoutes = await findProfitableRoutes(pools, token, initialAmountIn);
+
+      for (const route of profitableRoutes) {
+        const gasCost = estimateGasCostInETH(route.swaps.length, GAS_PRICE_GWEI);
+        const netProfit = route.profitAbsolute - gasCost;
+
+        const formattedRoute: FormattedRouteResult = {
+          route: route.swaps.map((s) => ({
+            tokenIn: { address: s.pool.tokenIn, symbol: "", decimals: 18 },
+            tokenOut: { address: s.pool.tokenOut, symbol: "", decimals: 18 },
+            dex: s.pool.protocol,
+            amountIn: s.amountIn,
+            amountOut: s.amountOut
+          })),
+          quote: {
+            profitPercent: route.profitPercent,
+            profitAbsolute: route.profitAbsolute
+          },
+          gasCost,
+          netProfit,
+          inputAmount: initialAmountIn
+        };
+
+        mevWatcher.emit("opportunity", formattedRoute);
+      }
+    }
+
+    console.log("Atualização completa, aguardando próxima iteração...");
+    await new Promise((r) => setTimeout(r, 5 * 60 * 1000));
+  }
 }

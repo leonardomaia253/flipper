@@ -1,137 +1,119 @@
+import {ethers} from "ethers";
+import {DexType} from "../utils/types";
 
-// Lending Protocol Addresses Arbitrum
-export const LENDING_POOL = {
-  AAVE_V3: {
-    POOL: "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
-    DATA_PROVIDER: "0x69FA688f1Dc47d4B5d8029D5a35FB7a548310654",
-    PRICE_ORACLE: "0xb56c2F0B653B2e0b10C9b928C8580Ac5Df02C7C7",
-  },
-  COMPOUND: {
-    COMPTROLLER: "0xbF0Bdd5C73813498D99b9F32BB4C0E84934F0885",
-    CETH: "0x49B905D34549DDF8B9A3A10431FD92e65D7038A2",
-    CUSDC: "0x8e88c303b84bB23b4579eAd3f23568795131B899",
-    CUSDT: "0x523eF7629A8b9b429139D8AF711F198c726Fc322",
-  },
-  MOONWELL: {
-    COMPTROLLER: "0xEaC24E578E872811f49A76d6861841A9E21a0DAe",
-    MWETH: "0x1637e4e9941D55703a7A5E7807d6aDA3f7DCD61B",
-    MUSDC: "0x38d693cE1dF5AaDF7bC62595A37D667aD57922e5",
-    MUSDT: "0x8664ec38f0b9A0D129F2887ebCE6fB684B86956B",
-  },
-  MORPHO: {
-    MAIN: "0x33333333333333333333333333333333",
-    DATA_PROVIDER: "0x44444444444444444444444444444444"
-  },
-  SEAMLESS: {
-    POOL: "0x55555555555555555555555555555555",
-    DATA_PROVIDER: "0x66666666666666666666666666666666",
-    PRICE_ORACLE: "0x77777777777777777777777777777777",
-  },
-  CENTRIFUGE: {
-    MAIN: "0x88888888888888888888888888888888",
-  }
+
+//Contratos de Routers
+export const uniswapv2Router = ethers.getAddress("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"); //Verified
+export const uniswapv3Router = ethers.getAddress("0xE592427A0AEce92De3Edee1F18E0157C05861564"); //Verified
+export const sushiswapv2Router = ethers.getAddress("0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506");//Verified
+export const sushiswapv3Router = ethers.getAddress("0xAC4c6e212A361c968F1725b4d055b47E63F80b75"); //Verified
+//Dex-Use-map DE ROUTERS
+export const DEX_ROUTER: Record<DexType, string> = {
+  uniswapv2: ethers.getAddress("0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"),
+  uniswapv3: ethers.getAddress("0xE592427A0AEce92De3Edee1F18E0157C05861564"),
+  sushiswapv3: ethers.getAddress("0xAC4c6e212A361c968F1725b4d055b47E63F80b75"),
+  sushiswapv2: ethers.getAddress("0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F"),
 };
 
-// DEX Router Addresses
-export const DEX_ROUTER = {
-  uniswapv2: "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24",
-  uniswapv3: "0xE592427A0AEce92De3Edee1F18E0157C05861564", 
-  sushiswapv3: "0xA7caC4207579A179c1069435d032ee0F9F150e5c", 
-  uniswapv4: "0xA51afAFe0263b40EdaEf0Df8781eA9aa03E381a3", 
-  camelot: "0xc873fEcbd354f5A56E00E710B90EF4201db2448d", 
-  maverickv2: "0x5c3b380e5Aeec389d1014Da3Eb372FA2C9e0fc76",
-  curve: "0x2191718cd32d02b8e60badffea33e4b5dd9a0a0d", 
-  sushiswapv2: "0xA7caC4207579A179c1069435d032ee0F9F150e5c",
-  pancakeswapv3: "0x13f4ea83d0bd40e75c8222255bc855a974568dd4",
-  ramsesv2: "0xaa273216cc9201a1e4285ca623f584badc736944",
+export const DEX_LIST_PRIORITY: DexType[] = [
+  "uniswapv2", "sushiswapv2", "sushiswapv3", "uniswapv3"
+];
+
+// Contratos de cada quoters dividios em formato unico e mapa
+
+//Contrato de quoters
+export const uniswapv3Quoter2 = ethers.getAddress("0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6"); //Verified
+export const sushiswapv3Quoter = ethers.getAddress("0x2214A42d8e2A1d20635c2cb0664422c528B6A432"); //Verified** 
+export const uniswapv2Quoter = ethers.getAddress("0x61ffe014ba17989e743c5f6cb21bf9697530b21e"); //Verified
+export const sushiswapv2Quoter = ethers.getAddress("0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F"); //Verified
+
+//Dex-Use-map DE qUOTERS
+export const DEX_QUOTERS: Record<DexType, string> = {
+  uniswapv2: ethers.getAddress("0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6"),
+  uniswapv3: ethers.getAddress("0x61ffe014ba17989e743c5f6cb21bf9697530b21e"),
+  sushiswapv3: ethers.getAddress("0x2214A42d8e2A1d20635c2cb0664422c528B6A432"),
+  sushiswapv2: ethers.getAddress("0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F"),
 };
 
-// DEX Router Addresses
-export const LENDING_PROTOCOL_ADDRESSES = {
-  aave: "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24",
-  spark: "0xE592427A0AEce92De3Edee1F18E0157C05861564", 
-  venus: "0xA7caC4207579A179c1069435d032ee0F9F150e5c", 
-  radiant: "0xA51afAFe0263b40EdaEf0Df8781eA9aa03E381a3", 
-  abracadabra: "0xc873fEcbd354f5A56E00E710B90EF4201db2448d", 
-  ironbank: "0x5c3b380e5Aeec389d1014Da3Eb372FA2C9e0fc76",
-  morpho: "0x2191718cd32d02b8e60badffea33e4b5dd9a0a0d", 
-  llamalend: "0xA7caC4207579A179c1069435d032ee0F9F150e5c",
-  creamfinance: "0x13f4ea83d0bd40e75c8222255bc855a974568dd4",
-  compound: "0xaa273216cc9201a1e4285ca623f584badc736944",
+
+// Contratos de cada Factory  divididos em formato unico e mapa
+
+//Contrato de Factory
+export const uniswapv3Factory = ethers.getAddress("0x1F98431c8aD98523631AE4a59f267346ea31F984"); //Verified
+export const uniswapv2Factory = ethers.getAddress("0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"); //Verified
+export const sushiswapv2Factory = ethers.getAddress("0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac"); //Verified
+export const sushiswapv3Factory = ethers.getAddress("0xbACEB8eC6b9355Dfc0269C18bac9d6E2Bdc29C4F");//Verified
+
+//Factory use
+export const DEX_FACTORY = {
+uniswapv3Factory: ethers.getAddress("0x1F98431c8aD98523631AE4a59f267346ea31F984"),
+uniswapv2Factory: ethers.getAddress("0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"),
+sushiswapv2Factory: ethers.getAddress("0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac"),
+sushiswapv3Factory: ethers.getAddress("0xbACEB8eC6b9355Dfc0269C18bac9d6E2Bdc29C4F"),
 };
 
-export const uniswapv2="0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24";
-export const uniswapv3Router="0xE592427A0AEce92De3Edee1F18E0157C05861564";
-export const uniswapv4Router="0xA51afAFe0263b40EdaEf0Df8781eA9aa03E381a3";
-export const sushiswapv2Router="0xA7caC4207579A179c1069435d032ee0F9F150e5c";
-export const sushiswapv3Router="0xA7caC4207579A179c1069435d032ee0F9F150e5c";
-export const pancakeswapv3Router="0x13f4ea83d0bd40e75c8222255bc855a974568dd4";
-export const curveRouter="0x2191718cd32d02b8e60badffea33e4b5dd9a0a0d";
-export const ramsesv2Router="0xaa273216cc9201a1e4285ca623f584badc736944";
-export const maverickv2Router="0x5c3b380e5Aeec389d1014Da3Eb372FA2C9e0fc76";
-export const camelotRouter="0xc873fEcbd354f5A56E00E710B90EF4201db2448d";
 
-export const uniswapv3Quoter2="0x61fFE014bA17989E743c5F6cB21bF9697530B21e";
-export const uniswapv3Quoter1="0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6";
-export const pancakeswapv3Quoter2="0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997";
-export const pancakeswapv3Quoter1='0x3652Fc6EDcbD76161b8554388867d3dAb65eCA93';
-export const CamelotQuoterAMMV3="0x0Fc73040b26E9bC8514fA028D998E73A254Fa76E";
-export const CamelotQuoterAMMV4="0x9b7A7c93Db745D5f6c679eeDa7Dd15CCd638C063";
 
-// Add the missing constants
-export const WETH = "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1";
-export const CHAINLINK_FEED_REGISTRY = "0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612";
-
-// Token Addresses
-export const TOKEN_ADDRESSES = {
-  WETH: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
-  USDC: "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8",
-  USDT: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
-  DAI: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
-  WBTC: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f",
+//Lending-use
+export const LENDING_PROTOCOL_addressES = {
+  aave: ethers.getAddress("0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24"),
+  spark: ethers.getAddress("0xe592427a0aece92de3edee1f18e0157c05861564"),
+  venus: ethers.getAddress("0xa7cac4207579a179c1069435d032ee0f9f150e5c"),
+  radiant: ethers.getAddress("0xa51afafe0263b40edaef0df8781ea9aa03e381a3"),
+  abracadabra: ethers.getAddress("0xc873fecbd354f5a56e00e710b90ef4201db2448d"),
+  ironbank: ethers.getAddress("0x5c3b380e5aeec389d1014da3eb372fa2c9e0fc76"),
+  morpho: ethers.getAddress("0x2191718cd32d02b8e60badffea33e4b5dd9a0a0d"),
+  llamalend: ethers.getAddress("0xa7cac4207579a179c1069435d032ee0f9f150e5c"),
+  creamfinance: ethers.getAddress("0x13f4ea83d0bd40e75c8222255bc855a974568dd4"),
+  compound: ethers.getAddress("0xaa273216cc9201a1e4285ca623f584badc736944"),
 };
 
-// Common tokens for Arbitrum
-export const COMMON_TOKENS_ARBITRUM = {
-  WETH: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
-  USDC: "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8",
-  USDT: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
-  DAI: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
-  WBTC: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f",
-  ARB: "0x912CE59144191C1204E64559FE8253a0e49E6548",
-  GMX: "0xfc5A1A6EB076a2C7aD06eD22C90d7E710E35ad0a",
+export const ALLOWED_ADDRESSES = new Set( [
+  "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+  "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+  "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506",
+  "0xAC4c6e212A361c968F1725b4d055b47E63F80b75",
+].map(addr => addr.toLowerCase())
+);
+export const SWAP_FUNCTION_SIGNATURES = new Set([
+  "0x38ed1739", // swapExactTokensForTokens
+  "0x5c11d795", // SwapExactTokensForTokensSupportingFeeOnTransferTokens
+  "0xc04b8d59", // exactInput
+  "0x414bf389", // ExactInputSingle
+  "0x8803dbee", //swapTokensForExactTokens
+
+]);
+
+// Chainlink Oracles
+export const CHAINLINK_ORACLES = {
+  ETH_USD: ethers.getAddress("0x639fe6ab55c921f74e7fac1ee960c0b6293ba612"),
+  BTC_USD: ethers.getAddress("0x6ce185860a4963106506c203335a2910413708e9"),
+  USDC_USD: ethers.getAddress("0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6"),
+  USDT_USD: ethers.getAddress("0x3E7d1eAB13ad0104d2750B8863b489D65364e32D"),
+  DAI_USD: ethers.getAddress("0xAed0c38402a5d19df6E4c03F4E2DceD6e29c1ee9"),
 };
 
 // Flashloan Providers
 export const FLASHLOAN_PROVIDERS = {
-  aave: "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
-  balancer: "0xBA12222222228d8Ba445958a75a0704d566BF2C8",
-  maker: "0x0000000000000000000000000000000000000000",
-};
-
-// MEV-related Addresses
-export const MEV_RELATED = {
-  FLASHBOTS_RELAY: "0xDAFEA492D9c6733ae3d56b7Ed1ADB60692c98Bc5",
-  MEV_SHARE: "0x0000000000000000000000000000000000000000",
-  EDEN_NETWORK: "0x0000000000000000000000000000000000000000",
-};
-
-// Executor contract address
-export const executorAddress = "0xebc996030ad65e113ba2f03e55de080044b83dca";
-
-export const CHAINLINK_FEEDS: Record<string, string> = {
-  // Token: Feed (em Arbitrum)
-  "0x82af49447d8a07e3bd95bd0d56f35241523fbab1": "0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612", // WETH/USD
-  "0xaf88d065e77c8cC2239327C5EDb3A432268e5831": "0x6ce185860a4963106506C203335A2910413708e9", // USDC/USD
-  "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9": "0x3f3f5dF88dC9F13eac63DF89EC16ef6e7E25DdE7", // USDT/USD
-  "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1": "0x0d79df66BE487753B02D015Fb622DED7f0E9798d", // DAI/USD
-  "0x2f2a2543b76a4166549f7aaab1e5cbe5f0f175c0": "0x6ce185860a4963106506C203335A2910413708e9", // WBTC/USD (mesmo feed que USDC/USD — ajuste se preferir outro)
-  "0x912ce59144191c1204e64559fe8253a0e49e6548": "0xb2A824043730FE05F3DA2efafa1CBbe83fa548D6", // ARB/USD
-  "0xfc5a1a6eb076a5f6a6a3f71d3df93076f1d2a77f": "0xDB98056FecFff59D032aB628337A4887110df3dB", // GMX/USD
+  AAVE_V3: ethers.getAddress("0x794a61358d6845594f94dc1db02a252b5b4814ad"),
+  BALANCER: ethers.getAddress("0xba12222222228d8ba445958a75a0704d566bf2c8"),
+  DYDX: ethers.getAddress("0x1e0447b19bb6ecfdae1e4ae1694b0c3659614e4e"),
 };
 
 
 
+// MEV Bots
+export const MEV_BOTS = {
+  FLASHBOTS_RELAY: "https://relay.flashbots.net",
+  BLOXROUTE_RELAY: "https://mev.api.blxrbdn.com",
+  EDEN_NETWORK: "https://api.edennetwork.io/v1/bundle",
+};
 
-//--------------------------------------------------BASE-------------------------------------------------------------------//
+// Gas Fee Estimators
+export const GAS_ESTIMATORS = {
+  ARBISCAN: "https://api.arbiscan.io/api?module=gastracker&action=gasoracle",
+  ETHERSCAN: "https://api.etherscan.io/api?module=gastracker&action=gasoracle",
+};
 
+export const executoraddress = ethers.getAddress("0x093adfecd56c5215378124fcc66e35d4e102f04f");
+export const WETH = ethers.getAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
